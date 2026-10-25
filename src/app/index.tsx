@@ -8,12 +8,11 @@ export default function Home() {
   return (
       <View style={styles.container}>
         <Text style={styles.title}>Bem-vindo ao LibrasVoice</Text>
-
-        <TouchableOpacity
-            style={styles.button}
-            onPress={() => router.push('/text-to-libras')}
-        >
-          <Text style={styles.buttonText}>Ir para Tradução (Texto para Libras)</Text>
+        <TouchableOpacity style={styles.button} onPress={() => router.push('/text-to-libras')}>
+          <Text style={styles.buttonText}>Texto para Libras</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.button} onPress={() => router.push('/libras-to-text')}>
+          <Text style={styles.buttonText}>Libras para Texto</Text>
         </TouchableOpacity>
       </View>
   );

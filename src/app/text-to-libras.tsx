@@ -5,9 +5,12 @@ import {
     View,
     TextInput,
     TouchableOpacity,
-    ScrollView,
     ActivityIndicator,
+    KeyboardAvoidingView,
+    Keyboard,
+    Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useVideoPlayer, VideoView } from 'expo-video';
 
 type SignItem = string;
@@ -16,9 +19,6 @@ const isVideoUrl = (item?: SignItem) =>
     typeof item === 'string' &&
     (item.includes('.mp4') || item.startsWith('http'));
 
-// URLs com acentos (ex.: .../Vídeos/AMANHÃ.mp4) precisam estar codificadas
-// (ex.: .../V%C3%ADdeos/AMANH%C3%83.mp4), senão o Safari/AVFoundation falha.
-// decodeURI antes evita codificar duas vezes URLs que já vêm codificadas.
 const normalizeUrl = (url: string) => {
     try {
         return encodeURI(decodeURI(url));
@@ -27,10 +27,16 @@ const normalizeUrl = (url: string) => {
     }
 };
 
-/**
- * Player de um único sinal. É montado com `key` diferente a cada passo,
- * então cada vídeo tem seu próprio player e seu próprio "terminou" (só dispara 1 vez).
- */
+function getApiBaseUrl(): string {
+    const fromEnv = process.env.EXPO_PUBLIC_API_URL;
+    if (fromEnv) return fromEnv.replace(/\/$/, '');
+
+    const host = Platform.OS === 'android' ? '10.0.2.2' : '127.0.0.1';
+    return `http://${host}:8000`;
+}
+
+const REQUEST_TIMEOUT_MS = 15000;
+
 function SignVideo({ uri, onEnd }: { uri: string; onEnd: () => void }) {
     const finishedRef = useRef(false);
     const [failed, setFailed] = useState(false);
@@ -43,14 +49,13 @@ function SignVideo({ uri, onEnd }: { uri: string; onEnd: () => void }) {
 
     const player = useVideoPlayer(normalizeUrl(uri), p => {
         p.loop = false;
-        p.muted = true; // Safari só permite autoplay sem som
+        p.muted = true; // Safari exige; no celular também evita som inesperado
         p.play();
     });
 
     useEffect(() => {
         const endSub = player.addListener('playToEnd', finish);
-        // Na web, play() chamado antes do <video> ser montado não faz nada.
-        // Por isso chamamos play() de novo quando o vídeo fica pronto.
+        // Na web, play() antes do <video> montar não faz nada; repetimos quando ficar pronto.
         if (player.status === 'readyToPlay') player.play();
 
         const statusSub = player.addListener('statusChange', ({ status, error }) => {
@@ -76,19 +81,22 @@ function SignVideo({ uri, onEnd }: { uri: string; onEnd: () => void }) {
 
     if (failed) {
         return (
-            <View style={styles.signCard}>
-                <Text style={styles.errorText}>Não foi possível carregar este vídeo.</Text>
+            <View style={styles.videoArea}>
+                <Text style={styles.videoErrorText}>
+                    Não foi possível carregar este vídeo.
+                </Text>
             </View>
         );
     }
 
     return (
-        <View style={styles.videoWrapper}>
+        <View style={styles.videoArea}>
             <VideoView
                 player={player}
-                style={styles.videoPlayer}
+                style={StyleSheet.absoluteFill}
                 contentFit="contain"
                 nativeControls={false}
+                allowsPictureInPicture={false}
                 onFirstFrameRender={() => player.play()}
             />
         </View>
@@ -96,6 +104,8 @@ function SignVideo({ uri, onEnd }: { uri: string; onEnd: () => void }) {
 }
 
 export default function TextToLibras() {
+    const insets = useSafeAreaInsets();
+
     const [inputText, setInputText] = useState('');
     const [signs, setSigns] = useState<SignItem[]>([]);
     const [loading, setLoading] = useState(false);
@@ -106,22 +116,23 @@ export default function TextToLibras() {
     const [runId, setRunId] = useState(0);
 
     async function handleFetchSigns(text: string) {
-        if (!text.trim()) return;
+        if (!text.trim() || loading) return;
+        Keyboard.dismiss();
         setLoading(true);
         setError('');
         setIsPlaying(false);
         setSigns([]);
         setCurrentIndex(0);
 
-        try {
-            const apiUrl =
-                (process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8000') +
-                '/textToLibras/translate';
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-            const res = await fetch(apiUrl, {
+        try {
+            const res = await fetch(`${getApiBaseUrl()}/textToLibras/translate`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ text: text }),
+                signal: controller.signal,
             });
 
             const data = await res.json();
@@ -140,10 +151,15 @@ export default function TextToLibras() {
             } else {
                 setError('Nenhum sinal encontrado para o texto.');
             }
-        } catch (err) {
+        } catch (err: any) {
             console.error(err);
-            setError('Erro de conexão com o servidor.');
+            setError(
+                err?.name === 'AbortError'
+                    ? 'O servidor demorou demais para responder.'
+                    : 'Erro de conexão com o servidor.'
+            );
         } finally {
+            clearTimeout(timeout);
             setLoading(false);
         }
     }
@@ -159,6 +175,7 @@ export default function TextToLibras() {
         [signs.length]
     );
 
+    // Itens que não são vídeo (texto) avançam por timer.
     useEffect(() => {
         if (!isPlaying || signs.length === 0) return;
         if (isVideoUrl(signs[currentIndex])) return;
@@ -170,16 +187,58 @@ export default function TextToLibras() {
 
     const currentItem = signs[currentIndex];
     const isCurrentVideo = isVideoUrl(currentItem);
+    const hasSigns = signs.length > 0 && !loading && currentItem !== undefined;
 
     return (
-        <ScrollView contentContainerStyle={styles.container}>
-            <View style={styles.inputContainer}>
+        <KeyboardAvoidingView
+            style={styles.root}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+            {/* Área principal: ocupa todo o espaço acima do input */}
+            <View style={[styles.stage, hasSigns && isCurrentVideo && styles.stageDark]}>
+                {loading && <ActivityIndicator size="large" color="#009432" />}
+
+                {!loading && error ? (
+                    <Text style={styles.errorText}>{error}</Text>
+                ) : null}
+
+                {hasSigns && (
+                    <>
+                        {isCurrentVideo ? (
+                            isPlaying ? (
+                                <SignVideo
+                                    key={`${runId}-${currentIndex}`}
+                                    uri={currentItem}
+                                    onEnd={() => advanceFrom(currentIndex)}
+                                />
+                            ) : (
+                                // Sequência terminou: tela preta, sem o último frame do vídeo
+                                <View style={styles.videoArea} />
+                            )
+                        ) : (
+                            <Text style={styles.signText}>{currentItem}</Text>
+                        )}
+
+                        <View style={styles.counterBadge} pointerEvents="none">
+                            <Text style={styles.counterText}>
+                                Passo {currentIndex + 1} de {signs.length}
+                            </Text>
+                        </View>
+                    </>
+                )}
+            </View>
+
+            {/* Input fixo na parte de baixo */}
+            <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
                 <TextInput
                     style={styles.input}
                     value={inputText}
                     onChangeText={setInputText}
                     placeholder="Digite o texto para traduzir..."
                     placeholderTextColor="#888"
+                    returnKeyType="send"
+                    onSubmitEditing={() => handleFetchSigns(inputText)}
+                    autoCorrect={false}
                 />
                 <TouchableOpacity
                     style={[styles.button, loading && styles.buttonDisabled]}
@@ -191,70 +250,75 @@ export default function TextToLibras() {
                     </Text>
                 </TouchableOpacity>
             </View>
-
-            {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
-            {loading && (
-                <ActivityIndicator
-                    size="large"
-                    color="#009432"
-                    style={{ marginTop: 20 }}
-                />
-            )}
-
-            {signs.length > 0 && !loading && currentItem !== undefined && (
-                <View style={styles.stageContainer}>
-                    <Text style={styles.counterText}>
-                        Passo {currentIndex + 1} de {signs.length}
-                    </Text>
-
-                    {isCurrentVideo ? (
-                        isPlaying ? (
-                            <SignVideo
-                                key={`${runId}-${currentIndex}`}
-                                uri={currentItem}
-                                onEnd={() => advanceFrom(currentIndex)}
-                            />
-                        ) : (
-                            // Sequência terminou: tela preta, sem o último frame do vídeo
-                            <View style={styles.videoWrapper} />
-                        )
-                    ) : (
-                        <View style={styles.signCard}>
-                            <Text style={styles.signText}>{currentItem}</Text>
-                        </View>
-                    )}
-                </View>
-            )}
-        </ScrollView>
+        </KeyboardAvoidingView>
     );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flexGrow: 1,
-        padding: 20,
-        alignItems: 'center',
+    root: {
+        flex: 1,
         backgroundColor: '#f5f6fa',
     },
-    title: {
-        fontSize: 22,
+    stage: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 20,
+    },
+    stageDark: {
+        backgroundColor: '#000',
+        padding: 0,
+    },
+    videoArea: {
+        ...StyleSheet.absoluteFill,
+        backgroundColor: '#000',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    videoErrorText: {
+        color: '#fff',
+        fontSize: 16,
+        textAlign: 'center',
+        paddingHorizontal: 20,
+    },
+    signText: {
+        fontSize: 36,
         fontWeight: 'bold',
-        marginBottom: 20,
-        color: '#2f3640',
+        color: '#009432',
         textAlign: 'center',
     },
-    inputContainer: {
-        width: '100%',
-        maxWidth: 600,
+    counterBadge: {
+        position: 'absolute',
+        top: 12,
+        alignSelf: 'center',
+        backgroundColor: 'rgba(0,0,0,0.55)',
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 14,
+    },
+    counterText: {
+        fontSize: 14,
+        color: '#fff',
+        fontWeight: '600',
+    },
+    errorText: {
+        color: '#e84118',
+        fontSize: 15,
+        textAlign: 'center',
+    },
+    inputBar: {
         flexDirection: 'row',
         gap: 10,
-        marginBottom: 20,
+        paddingHorizontal: 16,
+        paddingTop: 12,
+        backgroundColor: '#fff',
+        borderTopWidth: 1,
+        borderTopColor: '#dcdde1',
     },
     input: {
         flex: 1,
         height: 50,
-        backgroundColor: '#fff',
+        backgroundColor: '#f5f6fa',
         borderWidth: 1,
         borderColor: '#dcdde1',
         borderRadius: 8,
@@ -266,9 +330,10 @@ const styles = StyleSheet.create({
         backgroundColor: '#009432',
         justifyContent: 'center',
         alignItems: 'center',
-        paddingHorizontal: 20,
+        paddingHorizontal: 16,
         borderRadius: 8,
         height: 50,
+        minWidth: 100,
     },
     buttonDisabled: {
         backgroundColor: '#718093',
@@ -277,56 +342,5 @@ const styles = StyleSheet.create({
         color: '#fff',
         fontSize: 16,
         fontWeight: 'bold',
-    },
-    errorText: {
-        color: '#e84118',
-        fontSize: 14,
-        marginBottom: 10,
-        textAlign: 'center',
-    },
-    stageContainer: {
-        width: '100%',
-        maxWidth: 400,
-        alignItems: 'center',
-        marginTop: 20,
-        padding: 20,
-        backgroundColor: '#fff',
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: '#dcdde1',
-        shadowColor: '#000',
-        shadowOpacity: 0.05,
-        shadowRadius: 5,
-        elevation: 2,
-    },
-    counterText: {
-        fontSize: 14,
-        color: '#718093',
-        marginBottom: 15,
-        fontWeight: '600',
-    },
-    signCard: {
-        padding: 30,
-        justifyContent: 'center',
-        alignItems: 'center',
-        minHeight: 180,
-        width: '100%',
-    },
-    signText: {
-        fontSize: 28,
-        fontWeight: 'bold',
-        color: '#009432',
-        textAlign: 'center',
-    },
-    videoWrapper: {
-        width: '100%',
-        height: 220,
-        backgroundColor: '#000',
-        borderRadius: 8,
-        overflow: 'hidden',
-    },
-    videoPlayer: {
-        width: '100%',
-        height: '100%',
     },
 });
