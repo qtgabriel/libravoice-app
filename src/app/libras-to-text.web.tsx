@@ -1,136 +1,187 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Linking } from 'react-native';
-import { useFocusEffect } from 'expo-router';
-import {
-    Camera,
-    useCameraDevice,
-    useCameraFormat,
-    useCameraPermission,
-    useFrameProcessor,
-    VisionCameraProxy,
-    type Frame,
-} from 'react-native-vision-camera';
-import { Worklets } from 'react-native-worklets-core';
-import { useLibrasSpelling, type Landmark, type Roi } from '../hooks/useLibrasSpelling';
+/**
+ * Tela Libras -> Texto (WEB).
+ * Webcam + MediaPipe HandLandmarker (@mediapipe/tasks-vision), mesma configuração do Python:
+ * 1 mão, confiança 0.7, modo VIDEO.
+ *
+ * O MediaPipe é carregado da CDN em tempo de execução (o Metro não consegue empacotar
+ * o @mediapipe/tasks-vision). Mantenha o pacote instalado só para os tipos do TypeScript:
+ *   npm i -D @mediapipe/tasks-vision
+ * Coloque em:  src/app/libras-to-text.web.tsx   (rota /libras-to-text)
+ * O hook fica em src/hooks/useLibrasSpelling.ts
+ */
+import React, { useEffect, useRef, useState } from 'react';
+import { View, Text, StyleSheet } from 'react-native';
+// Só tipos: o código do pacote NÃO entra no bundle do Metro (ele não consegue processar
+// o vision_bundle.mjs, que usa import() dinâmico). O código real é carregado da CDN abaixo.
+import type { HandLandmarker } from '@mediapipe/tasks-vision';
+import { useLibrasSpelling, ROI } from '../hooks/useLibrasSpelling';
 
-// Caixa guia para o celular em retrato (a do Python é para uma imagem 640x480 deitada).
-const NATIVE_ROI: Roi = { x1: 0.1, y1: 0.2, x2: 0.9, y2: 0.8 };
+// O JS e o WASM vêm da mesma versão, na mesma CDN. Ajuste se quiser outra versão.
+const TASKS_VISION_VERSION = '0.10.14';
+const TASKS_VISION_BASE = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${TASKS_VISION_VERSION}`;
+const WASM_URL = `${TASKS_VISION_BASE}/wasm`;
 
-type HandResult = { landmarks: Landmark[]; isMirrored: boolean } | null;
+type TasksVision = typeof import('@mediapipe/tasks-vision');
 
-const plugin = VisionCameraProxy.initFrameProcessorPlugin('handLandmarks', {});
+// `new Function` esconde o import() do Metro, que recusa import dinâmico com URL.
+// O navegador executa normalmente.
+const importFromUrl = new Function('url', 'return import(url)') as (
+    url: string
+) => Promise<TasksVision>;
 
-function handLandmarks(frame: Frame): HandResult {
-    'worklet';
-    if (plugin == null) {
-        throw new Error(
-            'Plugin "handLandmarks" não encontrado. Ele só existe no build nativo (rode expo run:ios).'
-        );
+let tasksVisionPromise: Promise<TasksVision> | null = null;
+function loadTasksVision() {
+    if (!tasksVisionPromise) {
+        tasksVisionPromise = importFromUrl(`${TASKS_VISION_BASE}/vision_bundle.mjs`);
     }
-    return plugin.call(frame) as unknown as HandResult;
+    return tasksVisionPromise;
+}
+const MODEL_URL =
+    'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
+
+async function createLandmarker() {
+    const { FilesetResolver, HandLandmarker } = await loadTasksVision();
+    const vision = await FilesetResolver.forVisionTasks(WASM_URL);
+    const make = (delegate: 'GPU' | 'CPU') =>
+        HandLandmarker.createFromOptions(vision, {
+            baseOptions: { modelAssetPath: MODEL_URL, delegate },
+            runningMode: 'VIDEO',
+            numHands: 1,
+            minHandDetectionConfidence: 0.7,
+            minHandPresenceConfidence: 0.7,
+        });
+    try {
+        return await make('GPU');
+    } catch {
+        return await make('CPU'); // fallback se o Safari/GPU falhar
+    }
 }
 
-export default function LibrasToTextNative() {
-    const { hasPermission, requestPermission } = useCameraPermission();
-    const device = useCameraDevice('front');
-    // 640x480 a 30 fps: o mesmo tamanho do seu teste em Python e leve para o MediaPipe.
-    const format = useCameraFormat(device, [
-        { videoResolution: { width: 640, height: 480 } },
-        { fps: 30 },
-    ]);
+function drawOverlay(
+    canvas: HTMLCanvasElement,
+    landmarks: { x: number; y: number }[] | null,
+    inBox: boolean
+) {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const { width: w, height: h } = canvas;
+    ctx.clearRect(0, 0, w, h);
 
-    const { word, apiError, pushLandmarks } = useLibrasSpelling({ roi: NATIVE_ROI });
-    const [inBox, setInBox] = useState(false);
-    const [active, setActive] = useState(false);
+    // Caixa guia (verde quando o pulso está dentro, vermelha fora)
+    ctx.strokeStyle = inBox ? '#00c853' : '#e84118';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(ROI.x1 * w, ROI.y1 * h, (ROI.x2 - ROI.x1) * w, (ROI.y2 - ROI.y1) * h);
+
+    if (landmarks) {
+        ctx.fillStyle = '#00ff66';
+        for (const l of landmarks) {
+            ctx.beginPath();
+            // o vídeo é exibido espelhado, então desenhamos com x invertido
+            ctx.arc((1 - l.x) * w, l.y * h, 4, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+}
+
+export default function LibrasToTextWeb() {
+    const { word, apiError, pushLandmarks } = useLibrasSpelling();
+
+    const videoRef = useRef<HTMLVideoElement>(null);
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const [status, setStatus] = useState('Carregando modelo...');
 
     useEffect(() => {
-        if (!hasPermission) requestPermission();
-    }, [hasPermission, requestPermission]);
+        let stopped = false;
+        let raf = 0;
+        let stream: MediaStream | null = null;
+        let landmarker: HandLandmarker | null = null;
 
-    // Câmera só ligada enquanto a tela estiver em foco.
-    useFocusEffect(
-        useCallback(() => {
-            setActive(true);
-            return () => setActive(false);
-        }, [])
-    );
+        async function start() {
+            landmarker = await createLandmarker();
+            if (stopped) return;
 
-    // Executa no JS (fora do worklet) a cada frame processado.
-    const onHand = useMemo(
-        () =>
-            Worklets.createRunOnJS((result: HandResult) => {
-                if (!result) {
-                    pushLandmarks(null);
-                    setInBox(false);
-                    return;
+            setStatus('Abrindo câmera...');
+            stream = await navigator.mediaDevices.getUserMedia({
+                video: { width: 640, height: 480, facingMode: 'user' },
+                audio: false,
+            });
+            if (stopped) return;
+
+            const video = videoRef.current!;
+            video.srcObject = stream;
+            video.muted = true;
+            await video.play();
+            setStatus('');
+
+            let lastVideoTime = -1;
+            const loop = () => {
+                if (stopped) return;
+                const canvas = canvasRef.current;
+                if (video.readyState >= 2 && video.currentTime !== lastVideoTime && canvas) {
+                    lastVideoTime = video.currentTime;
+                    canvas.width = video.videoWidth || 640;
+                    canvas.height = video.videoHeight || 480;
+
+                    const result = landmarker!.detectForVideo(video, performance.now());
+                    const hand = result.landmarks[0] ?? null;
+                    const points = hand ? hand.map(l => ({ x: l.x, y: l.y, z: l.z })) : null;
+
+                    const inBox = pushLandmarks(points);
+                    drawOverlay(canvas, points, inBox);
                 }
-                // O hook espera o frame NÃO espelhado e espelha por conta própria (como o
-                // cv2.flip do Python). Se a câmera já entregou espelhado, desfazemos antes.
-                const raw = result.isMirrored
-                    ? result.landmarks.map(l => ({ x: 1 - l.x, y: l.y, z: l.z }))
-                    : result.landmarks;
-                setInBox(pushLandmarks(raw));
-            }),
-        [pushLandmarks]
-    );
+                raf = requestAnimationFrame(loop);
+            };
+            loop();
+        }
 
-    const frameProcessor = useFrameProcessor(
-        frame => {
-            'worklet';
-            const result = handLandmarks(frame);
-            onHand(result);
-        },
-        [onHand]
-    );
+        start().catch(e => {
+            console.error(e);
+            setStatus(
+                'Não foi possível iniciar a câmera ou o modelo. Verifique a permissão de câmera e use http://localhost.'
+            );
+        });
 
-    if (!hasPermission) {
-        return (
-            <View style={styles.center}>
-                <Text style={styles.text}>O app precisa de acesso à câmera para ler os sinais.</Text>
-                <TouchableOpacity style={styles.button} onPress={() => Linking.openSettings()}>
-                    <Text style={styles.buttonText}>Abrir ajustes</Text>
-                </TouchableOpacity>
-            </View>
-        );
-    }
-
-    if (device == null) {
-        return (
-            <View style={styles.center}>
-                <Text style={styles.text}>Câmera frontal não encontrada neste aparelho.</Text>
-            </View>
-        );
-    }
+        return () => {
+            stopped = true;
+            cancelAnimationFrame(raf);
+            stream?.getTracks().forEach(t => t.stop());
+            landmarker?.close();
+        };
+    }, [pushLandmarks]);
 
     return (
         <View style={styles.container}>
-            <View style={styles.preview}>
-                <Camera
-                    style={StyleSheet.absoluteFill}
-                    device={device}
-                    format={format}
-                    fps={30}
-                    isActive={active}
-                    pixelFormat="rgb" // o MediaPipe precisa de BGRA, não do YUV padrão
-                    frameProcessor={frameProcessor}
-                />
+            <Text style={styles.title}>Libras para Texto</Text>
 
-                {/* Caixa guia: verde quando o pulso está dentro */}
-                <View
-                    pointerEvents="none"
-                    style={[
-                        styles.roi,
-                        {
-                            left: `${NATIVE_ROI.x1 * 100}%`,
-                            top: `${NATIVE_ROI.y1 * 100}%`,
-                            width: `${(NATIVE_ROI.x2 - NATIVE_ROI.x1) * 100}%`,
-                            height: `${(NATIVE_ROI.y2 - NATIVE_ROI.y1) * 100}%`,
-                            borderColor: inBox ? '#00c853' : '#e84118',
-                        },
-                    ]}
+            <div
+                style={{
+                    position: 'relative',
+                    width: '100%',
+                    maxWidth: 640,
+                    aspectRatio: '4 / 3',
+                    background: '#000',
+                    borderRadius: 12,
+                    overflow: 'hidden',
+                }}
+            >
+                <video
+                    ref={videoRef}
+                    playsInline
+                    muted
+                    style={{
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover',
+                        transform: 'scaleX(-1)', // espelhado, como o cv2.flip do Python
+                    }}
                 />
-            </View>
+                <canvas
+                    ref={canvasRef}
+                    style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
+                />
+            </div>
 
+            {status ? <Text style={styles.status}>{status}</Text> : null}
             {apiError ? <Text style={styles.error}>{apiError}</Text> : null}
 
             <View style={styles.wordBox}>
@@ -142,41 +193,23 @@ export default function LibrasToTextNative() {
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, alignItems: 'center', padding: 16, gap: 12, backgroundColor: '#f5f6fa' },
-    center: {
+    container: {
         flex: 1,
         alignItems: 'center',
-        justifyContent: 'center',
-        padding: 24,
+        padding: 20,
         gap: 14,
         backgroundColor: '#f5f6fa',
     },
-    text: { fontSize: 15, color: '#718093', textAlign: 'center', lineHeight: 22 },
-    preview: {
-        width: '100%',
-        maxWidth: 480,
-        aspectRatio: 3 / 4,
-        backgroundColor: '#000',
-        borderRadius: 12,
-        overflow: 'hidden',
-    },
-    roi: { position: 'absolute', borderWidth: 3, borderRadius: 6 },
+    title: { fontSize: 22, fontWeight: 'bold', color: '#2f3640' },
+    status: { color: '#718093', fontSize: 14, textAlign: 'center' },
     error: { color: '#e84118', fontSize: 14, textAlign: 'center' },
     wordBox: {
         width: '100%',
-        maxWidth: 480,
+        maxWidth: 640,
         backgroundColor: '#000',
         borderRadius: 12,
         padding: 16,
     },
     wordLabel: { color: '#8e9aa6', fontSize: 12, marginBottom: 4 },
     word: { color: '#00ff66', fontSize: 32, fontWeight: 'bold', letterSpacing: 4 },
-    button: {
-        backgroundColor: '#009432',
-        paddingHorizontal: 20,
-        height: 46,
-        borderRadius: 8,
-        justifyContent: 'center',
-    },
-    buttonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
 });
