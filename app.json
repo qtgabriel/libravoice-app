@@ -10,9 +10,13 @@
     "ios": {
       "icon": "./assets/expo.icon",
       "infoPlist": {
-        "NSCameraUsageDescription": "O app usa a câmera para ler sinais de Libras."
+        "NSCameraUsageDescription": "O app usa a câmera para ler sinais de Libras.",
+        "NSLocalNetworkUsageDescription": "O app usa a rede local para se conectar ao servidor de tradução.",
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        }
       },
-      "bundleIdentifier": "com.anonymous.libravoice-app"
+      "bundleIdentifier": "com.gabrielteodoro.libravoiceapp"
     },
     "android": {
       "adaptiveIcon": {
@@ -24,7 +28,8 @@
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.CAMERA"
-      ]
+      ],
+      "package": "com.anonymous.libravoiceapp"
     },
     "web": {
       "output": "server",
@@ -38,12 +43,6 @@
           "backgroundColor": "#208AEF",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
-        }
-      ],
-      [
-        "react-native-vision-camera",
-        {
-          "cameraPermissionText": "O app usa a câmera para ler sinais de Libras."
         }
       ]
     ],

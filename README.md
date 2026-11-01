@@ -1,56 +1,91 @@
-# Welcome to your Expo app 👋
+# LibraVoice
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+App de tradução bilateral **PT-BR ⇄ Libras**.
 
-## Get started
+- **Texto → Libras**: o texto é enviado ao FastAPI, que devolve a sequência de vídeos/sinais.
+- **Libras → Texto**: o iPhone detecta os 21 pontos da mão **no próprio aparelho** com MediaPipe
+  HandLandmarker (VisionCamera v5 + um módulo Nitro local). Só os landmarks vão para o FastAPI,
+  que roda o modelo `.pkl` e devolve a letra.
 
-1. Install dependencies
+## Stack
 
-   ```bash
-   npm install
-   ```
+- Expo SDK 58 / React Native 0.88 / Expo Router
+- VisionCamera **v5** + `react-native-vision-camera-worklets` (frame output)
+- `react-native-nitro-modules` + módulo local [`modules/hand-landmarks`](modules/hand-landmarks)
+- MediaPipeTasksVision (pod iOS) e `hand_landmarker.task` empacotado no app
 
-2. Start the app
+## Rodando o backend
 
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **src/app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+No repositório `libravoice-server`:
 
 ```bash
-npm run reset-project
+uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-This command will move the starter code to the **example** directory and create a blank **src/app** directory where you can start developing.
+O `--host 0.0.0.0` é obrigatório para o iPhone alcançar o Mac na rede local.
 
-### Other setup steps
+O app deriva o IP do Mac de `Constants.expoConfig.hostUri` (o host do Metro).
+Se precisar forçar outro endereço:
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+```bash
+EXPO_PUBLIC_API_URL=http://192.168.0.10:8000 npx expo start --dev-client
+```
 
-## Learn more
+## Rodando o app no iPhone
 
-To learn more about developing your project with Expo, look at the following resources:
+O frame processor e o MediaPipe são código nativo: **não roda no Expo Go nem no simulador**
+(simulador não tem câmera). Use um iPhone físico:
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+```bash
+npx expo run:ios --device
+```
 
-## Join the community
+Na primeira vez, o Xcode pede o time de desenvolvimento (conta Apple). O
+`ios/` e o `android/` são gerados (CNG) e estão no `.gitignore`; não edite à mão.
 
-Join our community of developers creating universal apps.
+### Modelo e specs nativas
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+O `hand_landmarker.task` fica em
+[`modules/hand-landmarks/ios/Resources`](modules/hand-landmarks/ios/Resources) e é copiado
+para o bundle pelo podspec.
+
+Se alterar a interface Nitro (`src/HandLandmarks.nitro.ts`), regenere:
+
+```bash
+npm run specs   # cd modules/hand-landmarks && nitrogen
+```
+
+Depois rode `npx expo prebuild` (ou `npx expo run:ios`) para o pod enxergar os arquivos novos.
+
+## Web
+
+A web usa a mesma tela em [`libras-to-text.web.tsx`](src/app/libras-to-text.web.tsx), com
+`@mediapipe/tasks-vision` carregado da CDN:
+
+```bash
+npx expo start --web
+```
+
+Funciona em `http://localhost`. Em outro dispositivo (iPhone Safari), a câmera exige HTTPS.
+
+## Estrutura
+
+```
+src/app/                 rotas (index, text-to-libras, libras-to-text)
+src/hooks/useLibrasSpelling.ts   envia landmarks, acumula letras, cooldown/inatividade
+modules/hand-landmarks/  módulo Nitro iOS (Swift + MediaPipeTasksVision)
+```
+
+## Contrato com a API
+
+`POST /librasToText/translate`
+
+```json
+{ "frames": [[{ "x": 0.1, "y": 0.2, "z": 0.0 }, "... 21 pontos ..."]] }
+```
+
+Resposta: `{ "status": 200, "data": { "translated_phrase": "A", "predictions_detail": [...] } }`.
+
+> O backend aceita `frames` (lista de frames) ou `landmarks`, mas o
+> `process_points` atual itera `frames: None` quando só `landmarks` é enviado.
+> Por isso o app manda `frames: [frame]` — um frame por requisição.

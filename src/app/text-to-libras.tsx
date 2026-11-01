@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useVideoPlayer, VideoView } from 'expo-video';
+import { getApiBaseUrl } from '../hooks/useLibrasSpelling';
 
 type SignItem = string;
 
@@ -26,14 +27,6 @@ const normalizeUrl = (url: string) => {
         return encodeURI(url);
     }
 };
-
-function getApiBaseUrl(): string {
-    const fromEnv = process.env.EXPO_PUBLIC_API_URL;
-    if (fromEnv) return fromEnv.replace(/\/$/, '');
-
-    const host = Platform.OS === 'android' ? '10.0.2.2' : '127.0.0.1';
-    return `http://${host}:8000`;
-}
 
 const REQUEST_TIMEOUT_MS = 15000;
 
@@ -129,7 +122,7 @@ export default function TextToLibras() {
 
         try {
             const res = await fetch(`${getApiBaseUrl()}/textToLibras/translate`, {
-                method: 'POST',
+            method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ text: text }),
                 signal: controller.signal,

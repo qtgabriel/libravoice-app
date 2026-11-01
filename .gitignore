@@ -1,4 +1,4 @@
-# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+# Learn more: https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
 
 # dependencies
 node_modules/
@@ -9,35 +9,47 @@ dist/
 web-build/
 expo-env.d.ts
 
-# Native
+# Native / build
 .kotlin/
 *.orig.*
+
+# Signing / secrets
 *.jks
+*.keystore
 *.p8
 *.p12
+*.pem
 *.key
 *.mobileprovision
 
 # Metro
 .metro-health-check*
 
-# debug
+# Debug logs
+*.log
 npm-debug.*
 yarn-debug.*
 yarn-error.*
 
 # macOS
 .DS_Store
-*.pem
 
-# local env files
-.env*.local
+# Local env files (keep .env.example tracked)
+.env
+.env.*
+!.env.example
 
-# typescript
+# TypeScript
 *.tsbuildinfo
 
-example
+# Cópia local do modelo na raiz: o app usa o que está em
+# modules/hand-landmarks/ios/Resources (esse é o arquivo versionado).
+/hand_landmarker.task
 
-# generated native folders
+# Saída do scripts/reset-project.js (só na raiz)
+/example
+
+# Pastas nativas geradas pelo CNG (ios/android).
+# O código nativo do app fica versionado em modules/hand-landmarks/.
 /ios
 /android

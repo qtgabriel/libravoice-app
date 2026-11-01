@@ -76,8 +76,8 @@ function drawOverlay(
         ctx.fillStyle = '#00ff66';
         for (const l of landmarks) {
             ctx.beginPath();
-            // o vídeo é exibido espelhado, então desenhamos com x invertido
-            ctx.arc((1 - l.x) * w, l.y * h, 4, 0, Math.PI * 2);
+            // Os pontos já chegam espelhados (como o cv2.flip do Python).
+            ctx.arc(l.x * w, l.y * h, 4, 0, Math.PI * 2);
             ctx.fill();
         }
     }
@@ -124,7 +124,11 @@ export default function LibrasToTextWeb() {
 
                     const result = landmarker!.detectForVideo(video, performance.now());
                     const hand = result.landmarks[0] ?? null;
-                    const points = hand ? hand.map(l => ({ x: l.x, y: l.y, z: l.z })) : null;
+                    // O vídeo é exibido espelhado (scaleX(-1)) e o Python detecta
+                    // no frame espelhado; espelhamos x para manter o mesmo treino.
+                    const points = hand
+                        ? hand.map(l => ({ x: 1 - l.x, y: l.y, z: l.z }))
+                        : null;
 
                     const inBox = pushLandmarks(points);
                     drawOverlay(canvas, points, inBox);
