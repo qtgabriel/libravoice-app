@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     View,
     Text,
@@ -16,8 +16,9 @@ import {
 import { NitroModules } from 'react-native-nitro-modules';
 import { scheduleOnRN } from 'react-native-worklets';
 import * as Speech from 'expo-speech';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { HandLandmarks } from 'libravoice-hand-landmarks';
-import { useLibrasSpelling, type Landmark, type Roi } from '../hooks/useLibrasSpelling';
+import { useLibrasSpelling, type Landmark, type Roi } from '@/hooks/useLibrasSpelling';
 
 // Caixa guia em retrato (o treino foi feito em 640x480 deitado).
 const NATIVE_ROI: Roi = { x1: 0.15, y1: 0.2, x2: 0.85, y2: 0.8 };
@@ -51,8 +52,10 @@ export default function LibrasToTextNative() {
 }
 
 function IosLibrasToText() {
+    const insets = useSafeAreaInsets();
     const { hasPermission, requestPermission, canRequestPermission } = useCameraPermission();
-    const { word, apiError, pushLandmarks, reset } = useLibrasSpelling(NATIVE_ROI);
+    const { word, apiError, pushLandmarks, reset, lastConfidence } =
+        useLibrasSpelling(NATIVE_ROI);
 
     // Cria o HybridObject uma única vez. Se o módulo nativo não estiver no
     // build, mostramos o erro em vez de derrubar a tela.
@@ -70,6 +73,11 @@ function IosLibrasToText() {
 
     const [inBox, setInBox] = useState(false);
     const [active, setActive] = useState(false);
+    const [landmarks, setLandmarks] = useState<Landmark[] | null>(null);
+    const [frameSize, setFrameSize] = useState<{ width: number; height: number } | null>(null);
+    const [previewSize, setPreviewSize] = useState({ width: 0, height: 0 });
+    const lastOverlayAtRef = useRef(0);
+    const loggedFrameRef = useRef(false);
 
     useEffect(() => {
         if (!hasPermission) requestPermission();
@@ -85,17 +93,41 @@ function IosLibrasToText() {
 
     // Roda no JS (fora do worklet) quando o plugin devolve os 63 números.
     const onLandmarks = useCallback(
-        (flat: number[]) => {
+        (flat: number[], frameWidth: number, frameHeight: number) => {
+            if (frameWidth > 0 && frameHeight > 0) {
+                setFrameSize(prev =>
+                    prev?.width === frameWidth && prev?.height === frameHeight
+                        ? prev
+                        : { width: frameWidth, height: frameHeight }
+                );
+                if (!loggedFrameRef.current) {
+                    loggedFrameRef.current = true;
+                    console.log(`[HandLandmarks] frame ${frameWidth}x${frameHeight}`);
+                }
+            }
+
+            const now = Date.now();
             if (!flat || flat.length < 63) {
                 setInBox(false);
                 pushLandmarks(null);
+                setLandmarks(prev => (prev == null ? prev : null));
                 return;
             }
             const pts: Landmark[] = [];
             for (let i = 0; i < 63; i += 3) {
-                pts.push({ x: flat[i], y: flat[i + 1], z: flat[i + 2] });
+                // O preview da câmera frontal é espelhado, mas o frame output
+                // entrega os landmarks sem espelho. Espelhamos o X para alinhar
+                // com o preview e manter a quiralidade usada no treino
+                // (o Python faz cv2.flip antes de detectar).
+                pts.push({ x: 1 - flat[i], y: flat[i + 1], z: flat[i + 2] });
             }
             setInBox(pushLandmarks(pts));
+
+            // Atualiza o overlay ~12x/s; 30x/s de re-render é desperdício.
+            if (now - lastOverlayAtRef.current > 80) {
+                lastOverlayAtRef.current = now;
+                setLandmarks(pts);
+            }
         },
         [pushLandmarks]
     );
@@ -104,12 +136,16 @@ function IosLibrasToText() {
         targetResolution: { width: 640, height: 480 },
         pixelFormat: 'rgb',
         dropFramesWhileBusy: true,
+        // Faz o VisionCamera rotacionar o buffer para a orientação de saída.
+        // Assim os landmarks ficam no mesmo sistema do preview (e o MediaPipe
+        // recebe a mão em pé, não deitada).
+        enablePhysicalBufferRotation: true,
         onFrame(frame) {
             'worklet';
             try {
                 if (plugin == null) return;
                 const landmarks = plugin.detect(frame);
-                scheduleOnRN(onLandmarks, landmarks);
+                scheduleOnRN(onLandmarks, landmarks, frame.width, frame.height);
             } catch {
                 // Um frame ruim não pode derrubar a câmera.
             } finally {
@@ -121,6 +157,26 @@ function IosLibrasToText() {
     // Evita recriar os arrays a cada render (o que reconfigura a sessão).
     const outputs = useMemo(() => [frameOutput], [frameOutput]);
     const constraints = useMemo(() => [{ fps: 30 }], []);
+
+    // O preview usa `resizeMode="cover"`: o frame é escalado para cobrir a view.
+    // Calculamos o mesmo retângulo para alinhar ROI e landmarks.
+    const previewLayout = useMemo(() => {
+        if (!frameSize || previewSize.width <= 0 || previewSize.height <= 0) {
+            return null;
+        }
+        const scale = Math.max(
+            previewSize.width / frameSize.width,
+            previewSize.height / frameSize.height
+        );
+        const contentW = frameSize.width * scale;
+        const contentH = frameSize.height * scale;
+        return {
+            contentW,
+            contentH,
+            offsetX: (previewSize.width - contentW) / 2,
+            offsetY: (previewSize.height - contentH) / 2,
+        };
+    }, [frameSize, previewSize]);
 
     const speak = useCallback(() => {
         if (!word) return;
@@ -180,7 +236,17 @@ function IosLibrasToText() {
 
     return (
         <View style={styles.container}>
-            <View style={styles.preview}>
+            <View
+                style={styles.preview}
+                onLayout={e => {
+                    const { width, height } = e.nativeEvent.layout;
+                    setPreviewSize(prev =>
+                        prev.width === width && prev.height === height
+                            ? prev
+                            : { width, height }
+                    );
+                }}
+            >
                 <Camera
                     style={StyleSheet.absoluteFill}
                     device="front"
@@ -190,29 +256,60 @@ function IosLibrasToText() {
                     mirrorMode="auto"
                     resizeMode="cover"
                 />
-                <View
-                    pointerEvents="none"
-                    style={[
-                        styles.roi,
-                        {
-                            left: `${NATIVE_ROI.x1 * 100}%`,
-                            top: `${NATIVE_ROI.y1 * 100}%`,
-                            width: `${(NATIVE_ROI.x2 - NATIVE_ROI.x1) * 100}%`,
-                            height: `${(NATIVE_ROI.y2 - NATIVE_ROI.y1) * 100}%`,
-                            borderColor: inBox ? '#00c853' : '#e84118',
-                        },
-                    ]}
-                />
+
+                {previewLayout ? (
+                    <View
+                        pointerEvents="none"
+                        style={[
+                            styles.roi,
+                            {
+                                left:
+                                    previewLayout.offsetX +
+                                    NATIVE_ROI.x1 * previewLayout.contentW,
+                                top:
+                                    previewLayout.offsetY +
+                                    NATIVE_ROI.y1 * previewLayout.contentH,
+                                width:
+                                    (NATIVE_ROI.x2 - NATIVE_ROI.x1) *
+                                    previewLayout.contentW,
+                                height:
+                                    (NATIVE_ROI.y2 - NATIVE_ROI.y1) *
+                                    previewLayout.contentH,
+                                borderColor: inBox ? '#00c853' : '#e84118',
+                            },
+                        ]}
+                    />
+                ) : null}
+
+                {previewLayout &&
+                    landmarks?.map((p, i) => (
+                        <View
+                            key={i}
+                            pointerEvents="none"
+                            style={[
+                                styles.dot,
+                                {
+                                    left:
+                                        previewLayout.offsetX +
+                                        p.x * previewLayout.contentW,
+                                    top:
+                                        previewLayout.offsetY +
+                                        p.y * previewLayout.contentH,
+                                },
+                            ]}
+                        />
+                    ))}
+
+                <View style={styles.hud} pointerEvents="none">
+                    <Text style={styles.wordLabel}>Palavra detectada</Text>
+                    <Text style={styles.word}>{word || '—'}</Text>
+                    <Text style={styles.confidence}>
+                        confiança {lastConfidence == null ? '—' : lastConfidence.toFixed(2)}
+                    </Text>
+                </View>
             </View>
 
-            {apiError ? <Text style={styles.error}>{apiError}</Text> : null}
-
-            <View style={styles.wordBox}>
-                <Text style={styles.wordLabel}>Palavra detectada</Text>
-                <Text style={styles.word}>{word || '—'}</Text>
-            </View>
-
-            <View style={styles.actions}>
+            <View style={[styles.actions, { paddingBottom: Math.max(insets.bottom, 8) }]}>
                 <TouchableOpacity
                     style={[styles.actionButton, !word && styles.actionDisabled]}
                     onPress={speak}
@@ -228,6 +325,8 @@ function IosLibrasToText() {
                     <Text style={styles.actionText}>Limpar</Text>
                 </TouchableOpacity>
             </View>
+
+            {apiError ? <Text style={styles.error}>{apiError}</Text> : null}
         </View>
     );
 }
@@ -235,10 +334,7 @@ function IosLibrasToText() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        alignItems: 'center',
-        padding: 16,
-        gap: 12,
-        backgroundColor: '#f5f6fa',
+        backgroundColor: '#000',
     },
     center: {
         flex: 1,
@@ -252,25 +348,49 @@ const styles = StyleSheet.create({
     errorTitle: { fontSize: 18, fontWeight: 'bold', color: '#e84118', textAlign: 'center' },
     mono: { fontSize: 12, color: '#718093', textAlign: 'center', fontFamily: 'Courier' },
     preview: {
+        flex: 1,
         width: '100%',
-        maxWidth: 480,
-        aspectRatio: 3 / 4,
         backgroundColor: '#000',
-        borderRadius: 12,
         overflow: 'hidden',
     },
     roi: { position: 'absolute', borderWidth: 3, borderRadius: 6 },
-    error: { color: '#e84118', fontSize: 14, textAlign: 'center' },
-    wordBox: {
-        width: '100%',
-        maxWidth: 480,
-        backgroundColor: '#000',
-        borderRadius: 12,
-        padding: 16,
+    dot: {
+        position: 'absolute',
+        width: 7,
+        height: 7,
+        borderRadius: 3.5,
+        marginLeft: -3.5,
+        marginTop: -3.5,
+        backgroundColor: '#00ff66',
     },
-    wordLabel: { color: '#8e9aa6', fontSize: 12, marginBottom: 4 },
-    word: { color: '#00ff66', fontSize: 32, fontWeight: 'bold', letterSpacing: 4 },
-    actions: { flexDirection: 'row', gap: 12 },
+    hud: {
+        position: 'absolute',
+        left: 12,
+        right: 12,
+        bottom: 12,
+        backgroundColor: 'rgba(0,0,0,0.6)',
+        borderRadius: 12,
+        padding: 12,
+    },
+    error: {
+        color: '#e84118',
+        fontSize: 14,
+        textAlign: 'center',
+        paddingHorizontal: 12,
+        paddingBottom: 8,
+        backgroundColor: '#000',
+    },
+    confidence: { color: '#8e9aa6', fontSize: 12, marginTop: 2 },
+    wordLabel: { color: '#8e9aa6', fontSize: 12 },
+    word: { color: '#00ff66', fontSize: 30, fontWeight: 'bold', letterSpacing: 4 },
+    actions: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        gap: 12,
+        paddingTop: 10,
+        paddingHorizontal: 12,
+        backgroundColor: '#000',
+    },
     actionButton: {
         backgroundColor: '#009432',
         paddingHorizontal: 20,

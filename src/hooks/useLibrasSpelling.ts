@@ -45,6 +45,7 @@ export function getApiBaseUrl(): string {
 export function useLibrasSpelling(roi: Roi = ROI) {
     const [word, setWord] = useState('');
     const [apiError, setApiError] = useState('');
+    const [lastConfidence, setLastConfidence] = useState<number | null>(null);
 
     const wordRef = useRef('');
     const lastLetterRef = useRef<string | null>(null);
@@ -103,6 +104,13 @@ export function useLibrasSpelling(roi: Roi = ROI) {
                     return res.json();
                 })
                 .then(json => {
+                    // Ajuda a diagnosticar: se a confiança ficar abaixo de 0,65,
+                    // o backend devolve translated_phrase vazio.
+                    const detail = json?.data?.predictions_detail?.[0];
+                    if (detail && typeof detail.confidence === 'number') {
+                        setLastConfidence(detail.confidence);
+                    }
+
                     const phrase = json?.data?.translated_phrase;
                     if (typeof phrase !== 'string' || phrase.length === 0) return;
 
@@ -141,5 +149,5 @@ export function useLibrasSpelling(roi: Roi = ROI) {
         return () => clearInterval(id);
     }, [reset]);
 
-    return { word, apiError, pushLandmarks, reset };
+    return { word, apiError, pushLandmarks, reset, lastConfidence };
 }
