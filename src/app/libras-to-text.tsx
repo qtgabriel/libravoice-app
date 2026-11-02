@@ -5,7 +5,6 @@ import {
     StyleSheet,
     TouchableOpacity,
     Linking,
-    Platform,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import {
@@ -15,7 +14,6 @@ import {
 } from 'react-native-vision-camera';
 import { NitroModules } from 'react-native-nitro-modules';
 import { scheduleOnRN } from 'react-native-worklets';
-import * as Speech from 'expo-speech';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { HandLandmarks } from 'libravoice-hand-landmarks';
 import { useLibrasSpelling, type Landmark, type Roi } from '@/hooks/useLibrasSpelling';
@@ -38,23 +36,13 @@ function getHandLandmarks(): HandLandmarks {
 }
 
 export default function LibrasToTextNative() {
-    // O módulo Nitro é iOS-only por enquanto (Android ficaria sem o plugin).
-    if (Platform.OS !== 'ios') {
-        return (
-            <View style={styles.center}>
-                <Text style={styles.text}>
-                    Libras para texto está disponível apenas no iOS por enquanto.
-                </Text>
-            </View>
-        );
-    }
-    return <IosLibrasToText />;
+    return <LibrasToTextCamera />;
 }
 
-function IosLibrasToText() {
+function LibrasToTextCamera() {
     const insets = useSafeAreaInsets();
     const { hasPermission, requestPermission, canRequestPermission } = useCameraPermission();
-    const { word, apiError, pushLandmarks, reset, lastConfidence } =
+    const { word, apiError, pushLandmarks, lastConfidence } =
         useLibrasSpelling(NATIVE_ROI);
 
     // Cria o HybridObject uma única vez. Se o módulo nativo não estiver no
@@ -178,18 +166,6 @@ function IosLibrasToText() {
         };
     }, [frameSize, previewSize]);
 
-    const speak = useCallback(() => {
-        if (!word) return;
-        Speech.stop();
-        Speech.speak(word, { language: 'pt-BR', rate: 0.9 });
-    }, [word]);
-
-    const clear = useCallback(() => {
-        Speech.stop();
-        setInBox(false);
-        reset();
-    }, [reset]);
-
     if (plugin == null) {
         return (
             <View style={styles.center}>
@@ -300,7 +276,11 @@ function IosLibrasToText() {
                         />
                     ))}
 
-                <View style={styles.hud} pointerEvents="none">
+                <View
+                    style={[styles.hud, { bottom: Math.max(insets.bottom, 12) }]}
+                    pointerEvents="none"
+                >
+                    {apiError ? <Text style={styles.error}>{apiError}</Text> : null}
                     <Text style={styles.wordLabel}>Palavra detectada</Text>
                     <Text style={styles.word}>{word || '—'}</Text>
                     <Text style={styles.confidence}>
@@ -308,25 +288,6 @@ function IosLibrasToText() {
                     </Text>
                 </View>
             </View>
-
-            <View style={[styles.actions, { paddingBottom: Math.max(insets.bottom, 8) }]}>
-                <TouchableOpacity
-                    style={[styles.actionButton, !word && styles.actionDisabled]}
-                    onPress={speak}
-                    disabled={!word}
-                >
-                    <Text style={styles.actionText}>Ouvir</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                    style={[styles.actionButton, !word && styles.actionDisabled]}
-                    onPress={clear}
-                    disabled={!word}
-                >
-                    <Text style={styles.actionText}>Limpar</Text>
-                </TouchableOpacity>
-            </View>
-
-            {apiError ? <Text style={styles.error}>{apiError}</Text> : null}
         </View>
     );
 }
@@ -367,39 +328,18 @@ const styles = StyleSheet.create({
         position: 'absolute',
         left: 12,
         right: 12,
-        bottom: 12,
         backgroundColor: 'rgba(0,0,0,0.6)',
         borderRadius: 12,
         padding: 12,
     },
     error: {
-        color: '#e84118',
-        fontSize: 14,
-        textAlign: 'center',
-        paddingHorizontal: 12,
-        paddingBottom: 8,
-        backgroundColor: '#000',
+        color: '#ff6b6b',
+        fontSize: 13,
+        marginBottom: 6,
     },
     confidence: { color: '#8e9aa6', fontSize: 12, marginTop: 2 },
     wordLabel: { color: '#8e9aa6', fontSize: 12 },
     word: { color: '#00ff66', fontSize: 30, fontWeight: 'bold', letterSpacing: 4 },
-    actions: {
-        flexDirection: 'row',
-        justifyContent: 'center',
-        gap: 12,
-        paddingTop: 10,
-        paddingHorizontal: 12,
-        backgroundColor: '#000',
-    },
-    actionButton: {
-        backgroundColor: '#009432',
-        paddingHorizontal: 20,
-        height: 44,
-        borderRadius: 8,
-        justifyContent: 'center',
-    },
-    actionDisabled: { backgroundColor: '#b2bec3' },
-    actionText: { color: '#fff', fontSize: 15, fontWeight: 'bold' },
     button: {
         backgroundColor: '#009432',
         paddingHorizontal: 20,

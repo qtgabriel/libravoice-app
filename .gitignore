@@ -1,5 +1,19 @@
 # Learn more: https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
 
+# ---------------------------------------------------------------------------
+# O que versionar para as builds nativas (iOS/Android):
+#   app.json, package.json, package-lock.json, babel.config.js
+#   modules/hand-landmarks/**  (Swift, Kotlin, Gradle/CMake, nitrogen/ e .task)
+#   .env.example
+#
+# O que NÃO versionar (gerado):
+#   ios/ e android/  -> recriados por `npx expo prebuild` (CNG)
+#   Pods/, build/, .cxx/, .gradle/, DerivedData/
+#
+# Se você optar por um fluxo "bare" e commitar ios/android, remova as linhas
+# /ios e /android do final e versione apenas as fontes — nunca Pods/build.
+# ---------------------------------------------------------------------------
+
 # dependencies
 node_modules/
 
@@ -34,6 +48,9 @@ yarn-error.*
 # macOS
 .DS_Store
 
+# IDE
+.idea/
+
 # Local env files (keep .env.example tracked)
 .env
 .env.*
@@ -42,8 +59,29 @@ yarn-error.*
 # TypeScript
 *.tsbuildinfo
 
+# iOS build artifacts
+Pods/
+xcuserdata/
+DerivedData/
+*.xcuserstate
+*.ipa
+*.dSYM
+
+# Android/Gradle/CMake build artifacts
+.gradle/
+local.properties
+build/
+.cxx/
+*.apk
+*.aab
+*.hprof
+
+# Saídas de build do módulo Android local (o código-fonte é versionado)
+/modules/hand-landmarks/android/build/
+/modules/hand-landmarks/android/.cxx/
+
 # Cópia local do modelo na raiz: o app usa o que está em
-# modules/hand-landmarks/ios/Resources (esse é o arquivo versionado).
+# modules/hand-landmarks/ios/Resources e android/src/main/assets.
 /hand_landmarker.task
 
 # Saída do scripts/reset-project.js (só na raiz)

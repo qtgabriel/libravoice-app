@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
+import * as Speech from 'expo-speech';
 
 export type Landmark = { x: number; y: number; z: number };
 export type Roi = { x1: number; y1: number; x2: number; y2: number };
@@ -65,6 +66,20 @@ export function useLibrasSpelling(roi: Roi = ROI) {
         lastLetterAtRef.current = 0;
         lastActivityAtRef.current = Date.now();
     }, [updateWord]);
+
+    const speakWord = useCallback((text: string) => {
+        const trimmed = text.trim();
+        if (!trimmed) return;
+        try {
+            Speech.stop();
+            Speech.speak(trimmed.toLowerCase(), {
+                language: 'pt-BR',
+                rate: 0.9,
+            });
+        } catch (e) {
+            console.warn('Erro ao falar a palavra:', e);
+        }
+    }, []);
 
     const pushLandmarks = useCallback(
         (pts: Landmark[] | null): boolean => {
@@ -139,15 +154,16 @@ export function useLibrasSpelling(roi: Roi = ROI) {
         [roi.x1, roi.x2, roi.y1, roi.y2, updateWord]
     );
 
-    // Se a mão sair da caixa por 3,5 s, limpa a palavra (igual ao teste.py).
+    // Se a mão sair da caixa por 3,5 s, lê a palavra traduzida e limpa.
     useEffect(() => {
         const id = setInterval(() => {
             if (wordRef.current && Date.now() - lastActivityAtRef.current > INACTIVITY_MS) {
+                speakWord(wordRef.current);
                 reset();
             }
         }, 250);
         return () => clearInterval(id);
-    }, [reset]);
+    }, [reset, speakWord]);
 
     return { word, apiError, pushLandmarks, reset, lastConfidence };
 }
