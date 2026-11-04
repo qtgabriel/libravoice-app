@@ -13,6 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { getApiBaseUrl } from '../hooks/useLibrasSpelling';
+import { Brand } from '@/constants/theme';
 
 type SignItem = string;
 
@@ -189,7 +190,7 @@ export default function TextToLibras() {
         >
             {/* Área principal: ocupa todo o espaço acima do input */}
             <View style={[styles.stage, hasSigns && isCurrentVideo && styles.stageDark]}>
-                {loading && <ActivityIndicator size="large" color="#009432" />}
+                {loading && <ActivityIndicator size="large" color={Brand.yellow} />}
 
                 {!loading && error ? (
                     <Text style={styles.errorText}>{error}</Text>
@@ -228,7 +229,9 @@ export default function TextToLibras() {
                     value={inputText}
                     onChangeText={setInputText}
                     placeholder="Digite o texto para traduzir..."
-                    placeholderTextColor="#888"
+                    placeholderTextColor={Brand.muted}
+                    selectionColor={Brand.yellow}
+                    keyboardAppearance="dark"
                     returnKeyType="send"
                     onSubmitEditing={() => handleFetchSigns(inputText)}
                     autoCorrect={false}
@@ -238,7 +241,7 @@ export default function TextToLibras() {
                     onPress={() => handleFetchSigns(inputText)}
                     disabled={loading}
                 >
-                    <Text style={styles.buttonText}>
+                    <Text style={[styles.buttonText, loading && styles.buttonTextDisabled]}>
                         {loading ? 'Traduzindo...' : 'Traduzir'}
                     </Text>
                 </TouchableOpacity>
@@ -250,7 +253,7 @@ export default function TextToLibras() {
 const styles = StyleSheet.create({
     root: {
         flex: 1,
-        backgroundColor: '#f5f6fa',
+        backgroundColor: Brand.black,
     },
     stage: {
         flex: 1,
@@ -259,17 +262,17 @@ const styles = StyleSheet.create({
         padding: 20,
     },
     stageDark: {
-        backgroundColor: '#000',
+        backgroundColor: Brand.black,
         padding: 0,
     },
     videoArea: {
         ...StyleSheet.absoluteFill,
-        backgroundColor: '#000',
+        backgroundColor: Brand.black,
         alignItems: 'center',
         justifyContent: 'center',
     },
     videoErrorText: {
-        color: '#fff',
+        color: Brand.white,
         fontSize: 16,
         textAlign: 'center',
         paddingHorizontal: 20,
@@ -277,25 +280,25 @@ const styles = StyleSheet.create({
     signText: {
         fontSize: 36,
         fontWeight: 'bold',
-        color: '#009432',
+        color: Brand.yellow,
         textAlign: 'center',
     },
     counterBadge: {
         position: 'absolute',
         top: 12,
         alignSelf: 'center',
-        backgroundColor: 'rgba(0,0,0,0.55)',
+        backgroundColor: 'rgba(0,0,0,0.72)',
         paddingHorizontal: 12,
         paddingVertical: 6,
         borderRadius: 14,
     },
     counterText: {
         fontSize: 14,
-        color: '#fff',
+        color: Brand.white,
         fontWeight: '600',
     },
     errorText: {
-        color: '#e84118',
+        color: Brand.danger,
         fontSize: 15,
         textAlign: 'center',
     },
@@ -304,23 +307,23 @@ const styles = StyleSheet.create({
         gap: 10,
         paddingHorizontal: 16,
         paddingTop: 12,
-        backgroundColor: '#fff',
+        backgroundColor: Brand.black,
         borderTopWidth: 1,
-        borderTopColor: '#dcdde1',
+        borderTopColor: Brand.border,
     },
     input: {
         flex: 1,
         height: 50,
-        backgroundColor: '#f5f6fa',
+        backgroundColor: Brand.surface,
         borderWidth: 1,
-        borderColor: '#dcdde1',
+        borderColor: Brand.border,
         borderRadius: 8,
         paddingHorizontal: 15,
         fontSize: 16,
-        color: '#2f3640',
+        color: Brand.white,
     },
     button: {
-        backgroundColor: '#009432',
+        backgroundColor: Brand.yellow,
         justifyContent: 'center',
         alignItems: 'center',
         paddingHorizontal: 16,
@@ -329,11 +332,14 @@ const styles = StyleSheet.create({
         minWidth: 100,
     },
     buttonDisabled: {
-        backgroundColor: '#718093',
+        backgroundColor: Brand.surfaceAlt,
     },
     buttonText: {
-        color: '#fff',
+        color: Brand.black,
         fontSize: 16,
         fontWeight: 'bold',
+    },
+    buttonTextDisabled: {
+        color: Brand.muted,
     },
 });

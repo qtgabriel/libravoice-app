@@ -17,9 +17,20 @@ import { scheduleOnRN } from 'react-native-worklets';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { HandLandmarks } from 'libravoice-hand-landmarks';
 import { useLibrasSpelling, type Landmark, type Roi } from '@/hooks/useLibrasSpelling';
+import { Brand } from '@/constants/theme';
 
-// Caixa guia em retrato (o treino foi feito em 640x480 deitado).
-const NATIVE_ROI: Roi = { x1: 0.15, y1: 0.2, x2: 0.85, y2: 0.8 };
+// Frame de saída em retrato (640x480 rotacionado pelo VisionCamera): 480x640.
+// A caixa é um quadrado de ROI_SIZE_PX pixels, centralizado. Ajuste este
+// número para aumentar/diminuir a área de detecção (ex.: 360, 400).
+const FRAME_W = 480;
+const FRAME_H = 640;
+const ROI_SIZE_PX = 320;
+const NATIVE_ROI: Roi = {
+    x1: (FRAME_W - ROI_SIZE_PX) / 2 / FRAME_W,
+    y1: (FRAME_H - ROI_SIZE_PX) / 2 / FRAME_H,
+    x2: (FRAME_W + ROI_SIZE_PX) / 2 / FRAME_W,
+    y2: (FRAME_H + ROI_SIZE_PX) / 2 / FRAME_H,
+};
 const MODEL_MISSING =
     'O modelo hand_landmarker.task não foi encontrado no bundle. Rode `npx expo prebuild` e recompile o app.';
 
@@ -251,7 +262,7 @@ function LibrasToTextCamera() {
                                 height:
                                     (NATIVE_ROI.y2 - NATIVE_ROI.y1) *
                                     previewLayout.contentH,
-                                borderColor: inBox ? '#00c853' : '#e84118',
+                                borderColor: inBox ? Brand.yellow : Brand.white,
                             },
                         ]}
                     />
@@ -295,7 +306,7 @@ function LibrasToTextCamera() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#000',
+        backgroundColor: Brand.black,
     },
     center: {
         flex: 1,
@@ -303,15 +314,15 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         padding: 24,
         gap: 14,
-        backgroundColor: '#f5f6fa',
+        backgroundColor: Brand.black,
     },
-    text: { fontSize: 15, color: '#718093', textAlign: 'center', lineHeight: 22 },
-    errorTitle: { fontSize: 18, fontWeight: 'bold', color: '#e84118', textAlign: 'center' },
-    mono: { fontSize: 12, color: '#718093', textAlign: 'center', fontFamily: 'Courier' },
+    text: { fontSize: 15, color: Brand.muted, textAlign: 'center', lineHeight: 22 },
+    errorTitle: { fontSize: 18, fontWeight: 'bold', color: Brand.danger, textAlign: 'center' },
+    mono: { fontSize: 12, color: Brand.muted, textAlign: 'center', fontFamily: 'Courier' },
     preview: {
         flex: 1,
         width: '100%',
-        backgroundColor: '#000',
+        backgroundColor: Brand.black,
         overflow: 'hidden',
     },
     roi: { position: 'absolute', borderWidth: 3, borderRadius: 6 },
@@ -322,30 +333,30 @@ const styles = StyleSheet.create({
         borderRadius: 3.5,
         marginLeft: -3.5,
         marginTop: -3.5,
-        backgroundColor: '#00ff66',
+        backgroundColor: Brand.yellow,
     },
     hud: {
         position: 'absolute',
         left: 12,
         right: 12,
-        backgroundColor: 'rgba(0,0,0,0.6)',
+        backgroundColor: 'rgba(0,0,0,0.72)',
         borderRadius: 12,
         padding: 12,
     },
     error: {
-        color: '#ff6b6b',
+        color: Brand.danger,
         fontSize: 13,
         marginBottom: 6,
     },
-    confidence: { color: '#8e9aa6', fontSize: 12, marginTop: 2 },
-    wordLabel: { color: '#8e9aa6', fontSize: 12 },
-    word: { color: '#00ff66', fontSize: 30, fontWeight: 'bold', letterSpacing: 4 },
+    confidence: { color: Brand.muted, fontSize: 12, marginTop: 2 },
+    wordLabel: { color: Brand.muted, fontSize: 12 },
+    word: { color: Brand.yellow, fontSize: 30, fontWeight: 'bold', letterSpacing: 4 },
     button: {
-        backgroundColor: '#009432',
+        backgroundColor: Brand.yellow,
         paddingHorizontal: 20,
         height: 46,
-        borderRadius: 8,
+        borderRadius: 12,
         justifyContent: 'center',
     },
-    buttonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+    buttonText: { color: Brand.black, fontSize: 16, fontWeight: 'bold' },
 });

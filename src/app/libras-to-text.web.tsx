@@ -15,6 +15,7 @@ import { View, Text, StyleSheet } from 'react-native';
 // o vision_bundle.mjs, que usa import() dinâmico). O código real é carregado da CDN abaixo.
 import type { HandLandmarker } from '@mediapipe/tasks-vision';
 import { useLibrasSpelling, ROI } from '../hooks/useLibrasSpelling';
+import { Brand } from '@/constants/theme';
 
 // O JS e o WASM vêm da mesma versão, na mesma CDN. Ajuste se quiser outra versão.
 const TASKS_VISION_VERSION = '0.10.14';
@@ -67,13 +68,13 @@ function drawOverlay(
     const { width: w, height: h } = canvas;
     ctx.clearRect(0, 0, w, h);
 
-    // Caixa guia (verde quando o pulso está dentro, vermelha fora)
-    ctx.strokeStyle = inBox ? '#00c853' : '#e84118';
+    // Caixa guia (amarela quando o pulso está dentro, branca fora)
+    ctx.strokeStyle = inBox ? Brand.yellow : Brand.white;
     ctx.lineWidth = 3;
     ctx.strokeRect(ROI.x1 * w, ROI.y1 * h, (ROI.x2 - ROI.x1) * w, (ROI.y2 - ROI.y1) * h);
 
     if (landmarks) {
-        ctx.fillStyle = '#00ff66';
+        ctx.fillStyle = Brand.yellow;
         for (const l of landmarks) {
             ctx.beginPath();
             // Os pontos já chegam espelhados (como o cv2.flip do Python).
@@ -202,18 +203,20 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         padding: 20,
         gap: 14,
-        backgroundColor: '#f5f6fa',
+        backgroundColor: Brand.black,
     },
-    title: { fontSize: 22, fontWeight: 'bold', color: '#2f3640' },
-    status: { color: '#718093', fontSize: 14, textAlign: 'center' },
-    error: { color: '#e84118', fontSize: 14, textAlign: 'center' },
+    title: { fontSize: 22, fontWeight: 'bold', color: Brand.white },
+    status: { color: Brand.muted, fontSize: 14, textAlign: 'center' },
+    error: { color: Brand.danger, fontSize: 14, textAlign: 'center' },
     wordBox: {
         width: '100%',
         maxWidth: 640,
-        backgroundColor: '#000',
+        backgroundColor: Brand.surface,
+        borderWidth: 1,
+        borderColor: Brand.border,
         borderRadius: 12,
         padding: 16,
     },
-    wordLabel: { color: '#8e9aa6', fontSize: 12, marginBottom: 4 },
-    word: { color: '#00ff66', fontSize: 32, fontWeight: 'bold', letterSpacing: 4 },
+    wordLabel: { color: Brand.muted, fontSize: 12, marginBottom: 4 },
+    word: { color: Brand.yellow, fontSize: 32, fontWeight: 'bold', letterSpacing: 4 },
 });
