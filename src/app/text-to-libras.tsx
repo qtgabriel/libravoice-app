@@ -1,3 +1,4 @@
+import Voice from '@react-native-voice/voice';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
     StyleSheet,
@@ -189,6 +190,54 @@ export default function TextToLibras() {
     const isCurrentVideo = isVideoUrl(currentItem);
     const hasSigns = signs.length > 0 && !loading && currentItem !== undefined;
 
+    const [isListening, setIsListening] = useState(false);
+
+// Configuração dos eventos de voz
+useEffect(() => {
+    Voice.onSpeechResults = (e: any) => {
+        if (e.value && e.value.length > 0) {
+            const spokenText = e.value[0];
+            setInputText(spokenText);
+            handleFetchSigns(spokenText); // Traduz automaticamente ao reconhecer
+        }
+    };
+
+    Voice.onSpeechError = (err: any) => {
+        console.error('Erro no reconhecimento de voz:', err);
+        setIsListening(false);
+    };
+
+    Voice.onSpeechEnd = () => {
+        setIsListening(false);
+    };
+
+    return () => {
+        Voice.destroy().then(Voice.removeAllListeners);
+    };
+}, []);
+
+const startListening = async () => {
+    try {
+        setError('');
+        setIsListening(true);
+        await Voice.start('pt-BR');
+    } catch (e) {
+        console.error(e);
+        setIsListening(false);
+        setError('Não foi possível iniciar o microfone.');
+    }
+};
+
+const stopListening = async () => {
+    try {
+        await Voice.stop();
+        setIsListening(false);
+    } catch (e) {
+        console.error(e);
+        setIsListening(false);
+    }
+};
+
     return (
         <KeyboardAvoidingView
             style={styles.root}
@@ -227,6 +276,32 @@ export default function TextToLibras() {
                     </>
                 )}
             </View>
+
+            <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+    {/* Botão de Microfone */}
+    <TouchableOpacity
+        style={[styles.micButton, isListening && styles.micButtonActive]}
+        onPress={isListening ? stopListening : startListening}
+    >
+        <Text style={styles.micButtonText}>
+            {isListening ? '🛑' : '🎤'}
+        </Text>
+    </TouchableOpacity>
+
+    <TextInput
+        style={styles.input}
+        value={inputText}
+        onChangeText={setInputText}
+        placeholder={isListening ? 'Ouvindo...' : 'Digite ou fale o texto...'}
+        placeholderTextColor="#888"
+        returnKeyType="send"
+        onSubmitEditing={() => handleFetchSigns(inputText)}
+        autoCorrect={false}
+    />
+    
+    {/* O seu botão de Traduzir continua aqui */}
+    ...
+</View>
 
             {/* Input fixo na parte de baixo */}
             <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
@@ -343,4 +418,21 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: 'bold',
     },
+    
+    micButton: {
+    backgroundColor: '#f1f2f6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 8,
+    height: 50,
+    width: 50,
+    borderWidth: 1,
+    borderColor: '#dcdde1',
+},
+micButtonActive: {
+    backgroundColor: '#ff4757', // Fica vermelho quando ativo
+},
+micButtonText: {
+    fontSize: 20,
+},
 });

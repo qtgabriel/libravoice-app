@@ -45,7 +45,8 @@
         {
           "cameraPermissionText": "O app usa a câmera para ler sinais de Libras."
         }
-      ]
+      ],
+      "@react-native-voice/voice"
     ],
     "experiments": {
       "typedRoutes": true,
