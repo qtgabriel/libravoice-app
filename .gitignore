@@ -1,4 +1,18 @@
-# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+# Learn more: https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+
+# ---------------------------------------------------------------------------
+# O que versionar para as builds nativas (iOS/Android):
+#   app.json, package.json, package-lock.json, babel.config.js
+#   modules/hand-landmarks/**  (Swift, Kotlin, Gradle/CMake, nitrogen/ e .task)
+#   .env.example
+#
+# O que NÃO versionar (gerado):
+#   ios/ e android/  -> recriados por `npx expo prebuild` (CNG)
+#   Pods/, build/, .cxx/, .gradle/, DerivedData/
+#
+# Se você optar por um fluxo "bare" e commitar ios/android, remova as linhas
+# /ios e /android do final e versione apenas as fontes — nunca Pods/build.
+# ---------------------------------------------------------------------------
 
 # dependencies
 node_modules/
@@ -9,35 +23,71 @@ dist/
 web-build/
 expo-env.d.ts
 
-# Native
+# Native / build
 .kotlin/
 *.orig.*
+
+# Signing / secrets
 *.jks
+*.keystore
 *.p8
 *.p12
+*.pem
 *.key
 *.mobileprovision
 
 # Metro
 .metro-health-check*
 
-# debug
+# Debug logs
+*.log
 npm-debug.*
 yarn-debug.*
 yarn-error.*
 
 # macOS
 .DS_Store
-*.pem
 
-# local env files
-.env*.local
+# IDE
+.idea/
 
-# typescript
+# Local env files (keep .env.example tracked)
+.env
+.env.*
+!.env.example
+
+# TypeScript
 *.tsbuildinfo
 
-example
+# iOS build artifacts
+Pods/
+xcuserdata/
+DerivedData/
+*.xcuserstate
+*.ipa
+*.dSYM
 
-# generated native folders
+# Android/Gradle/CMake build artifacts
+.gradle/
+local.properties
+build/
+.cxx/
+*.apk
+*.aab
+*.hprof
+
+# Saídas de build do módulo Android local (o código-fonte é versionado)
+/modules/hand-landmarks/android/build/
+/modules/hand-landmarks/android/.cxx/
+
+# Cópia local do modelo na raiz: o app usa o que está em
+# modules/hand-landmarks/ios/Resources e android/src/main/assets.
+/hand_landmarker.task
+
+# Saída do scripts/reset-project.js (só na raiz)
+/example
+
+# Pastas nativas geradas pelo CNG (ios/android).
+# O código nativo do app fica versionado em modules/hand-landmarks/.
 /ios
 /android
