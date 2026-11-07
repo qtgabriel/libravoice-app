@@ -36,6 +36,9 @@ expo-env.d.ts
 *.key
 *.mobileprovision
 
+# Certificado público da cadeia da UFSC (não é segredo)
+!plugins/certs/ufsc-video-yr2.pem
+
 # Metro
 .metro-health-check*
 
