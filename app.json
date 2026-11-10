@@ -15,7 +15,8 @@
         "NSLocalNetworkUsageDescription": "O app usa a rede local para se conectar ao servidor de tradução.",
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
-        }
+        },
+        "NSMicrophoneUsageDescription": "O app usa o microfone para o reconhecimento de voz."
       },
       "bundleIdentifier": "com.gabrielteodoro.libravoiceapp"
     },
@@ -26,7 +27,8 @@
       },
       "predictiveBackGestureEnabled": false,
       "permissions": [
-        "android.permission.CAMERA"
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
       ],
       "package": "com.anonymous.libravoiceapp"
     },
@@ -45,7 +47,13 @@
           "resizeMode": "contain"
         }
       ],
-      "@react-native-voice/voice"
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Permitir que o aplicativo acesse o microfone para traduzir a voz para Libras.",
+          "speechRecognitionPermission": "Permitir que o aplicativo utilize o reconhecimento de fala."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
