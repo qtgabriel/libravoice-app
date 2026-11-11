@@ -9,9 +9,11 @@ import {
     KeyboardAvoidingView,
     Keyboard,
     Platform,
+    Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useVideoPlayer, VideoView } from 'expo-video';
+import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
 import { getApiBaseUrl } from '../hooks/useLibrasSpelling';
 import { Brand } from '@/constants/theme';
 
@@ -43,13 +45,12 @@ function SignVideo({ uri, onEnd }: { uri: string; onEnd: () => void }) {
 
     const player = useVideoPlayer(normalizeUrl(uri), p => {
         p.loop = false;
-        p.muted = true; // Safari exige; no celular também evita som inesperado
+        p.muted = true;
         p.play();
     });
 
     useEffect(() => {
         const endSub = player.addListener('playToEnd', finish);
-        // Na web, play() antes do <video> montar não faz nada; repetimos quando ficar pronto.
         if (player.status === 'readyToPlay') player.play();
 
         const statusSub = player.addListener('statusChange', ({ status, error }) => {
@@ -66,7 +67,6 @@ function SignVideo({ uri, onEnd }: { uri: string; onEnd: () => void }) {
         };
     }, [player, finish, uri]);
 
-    // Se o vídeo falhar, mostra o aviso por 2s e segue para o próximo passo.
     useEffect(() => {
         if (!failed) return;
         const t = setTimeout(finish, 2000);
@@ -108,6 +108,7 @@ export default function TextToLibras() {
     const [currentIndex, setCurrentIndex] = useState(0);
     const [isPlaying, setIsPlaying] = useState(false);
     const [runId, setRunId] = useState(0);
+    const [isListening, setIsListening] = useState(false);
 
     async function handleFetchSigns(text: string) {
         if (!text.trim() || loading) return;
@@ -123,7 +124,7 @@ export default function TextToLibras() {
 
         try {
             const res = await fetch(`${getApiBaseUrl()}/textToLibras/translate`, {
-            method: 'POST',
+                method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ text: text }),
                 signal: controller.signal,
@@ -169,7 +170,6 @@ export default function TextToLibras() {
         [signs.length]
     );
 
-    // Itens que não são vídeo (texto) avançam por timer.
     useEffect(() => {
         if (!isPlaying || signs.length === 0) return;
         if (isVideoUrl(signs[currentIndex])) return;
@@ -183,12 +183,61 @@ export default function TextToLibras() {
     const isCurrentVideo = isVideoUrl(currentItem);
     const hasSigns = signs.length > 0 && !loading && currentItem !== undefined;
 
+    // --- CONFIGURAÇÃO DO EXPO-SPEECH-RECOGNITION ---
+    useSpeechRecognitionEvent('result', (event) => {
+        const text = event.results[0]?.transcript;
+        if (text) {
+            setInputText(text);
+            handleFetchSigns(text); // Traduz automaticamente ao reconhecer a fala
+        }
+    });
+
+    useSpeechRecognitionEvent('start', () => setIsListening(true));
+    useSpeechRecognitionEvent('end', () => setIsListening(false));
+    useSpeechRecognitionEvent('error', (event) => {
+        console.error('Erro no reconhecimento de voz:', event.error);
+        setIsListening(false);
+        setError('Erro no reconhecimento de voz.');
+    });
+
+    const startListening = async () => {
+        try {
+            setError('');
+            const permissionResult = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+            
+            if (!permissionResult.granted) {
+                Alert.alert('Permissão negada', 'Precisamos de acesso ao microfone para traduzir a voz.');
+                return;
+            }
+
+            ExpoSpeechRecognitionModule.start({
+                lang: 'pt-BR',
+                interimResults: true,
+                maxAlternatives: 1,
+                continuous: false,
+            });
+        } catch (e) {
+            console.error(e);
+            setIsListening(false);
+            setError('Não foi possível iniciar o microfone.');
+        }
+    };
+
+    const stopListening = async () => {
+        try {
+            ExpoSpeechRecognitionModule.stop();
+        } catch (e) {
+            console.error(e);
+            setIsListening(false);
+        }
+    };
+
     return (
         <KeyboardAvoidingView
             style={styles.root}
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
-            {/* Área principal: ocupa todo o espaço acima do input */}
+            {/* Área principal do vídeo/sinais */}
             <View style={[styles.stage, hasSigns && isCurrentVideo && styles.stageDark]}>
                 {loading && <ActivityIndicator size="large" color={Brand.yellow} />}
 
@@ -206,7 +255,6 @@ export default function TextToLibras() {
                                     onEnd={() => advanceFrom(currentIndex)}
                                 />
                             ) : (
-                                // Sequência terminou: tela preta, sem o último frame do vídeo
                                 <View style={styles.videoArea} />
                             )
                         ) : (
@@ -222,13 +270,22 @@ export default function TextToLibras() {
                 )}
             </View>
 
-            {/* Input fixo na parte de baixo */}
+            {/* Barra Inferior Unificada (Microfone + Input + Botão Traduzir) */}
             <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+                <TouchableOpacity
+                    style={[styles.micButton, isListening && styles.micButtonActive]}
+                    onPress={isListening ? stopListening : startListening}
+                >
+                    <Text style={styles.micButtonText}>
+                        {isListening ? '🛑' : '🎤'}
+                    </Text>
+                </TouchableOpacity>
+
                 <TextInput
                     style={styles.input}
                     value={inputText}
                     onChangeText={setInputText}
-                    placeholder="Digite o texto para traduzir..."
+                    placeholder={isListening ? 'Ouvindo...' : 'Digite ou fale o texto...'}
                     placeholderTextColor={Brand.muted}
                     selectionColor={Brand.yellow}
                     keyboardAppearance="dark"
@@ -236,6 +293,7 @@ export default function TextToLibras() {
                     onSubmitEditing={() => handleFetchSigns(inputText)}
                     autoCorrect={false}
                 />
+
                 <TouchableOpacity
                     style={[styles.button, loading && styles.buttonDisabled]}
                     onPress={() => handleFetchSigns(inputText)}
@@ -310,6 +368,7 @@ const styles = StyleSheet.create({
         backgroundColor: Brand.black,
         borderTopWidth: 1,
         borderTopColor: Brand.border,
+        alignItems: 'center',
     },
     input: {
         flex: 1,
@@ -329,7 +388,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 16,
         borderRadius: 8,
         height: 50,
-        minWidth: 100,
+        minWidth: 90,
     },
     buttonDisabled: {
         backgroundColor: Brand.surfaceAlt,
@@ -341,5 +400,21 @@ const styles = StyleSheet.create({
     },
     buttonTextDisabled: {
         color: Brand.muted,
+    },
+    micButton: {
+        backgroundColor: Brand.surface,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderRadius: 8,
+        height: 50,
+        width: 50,
+        borderWidth: 1,
+        borderColor: Brand.border,
+    },
+    micButtonActive: {
+        backgroundColor: '#ff4757', // Vermelho quando ativo ouvindo
+    },
+    micButtonText: {
+        fontSize: 20,
     },
 });
