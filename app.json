@@ -53,7 +53,8 @@
           "microphonePermission": "Permitir que o aplicativo acesse o microfone para traduzir a voz para Libras.",
           "speechRecognitionPermission": "Permitir que o aplicativo utilize o reconhecimento de fala."
         }
-      ]
+      ],
+      "./plugins/withUfscVideoTrust"
     ],
     "experiments": {
       "typedRoutes": true,

@@ -160,5 +160,11 @@ Se você mudar a interface Nitro (`HandLandmarks.nitro.ts`), rode `npm run specs
   confie no “Apple Development: …”.
 - **Câmera abre mas não detecta**: confira a permissão de câmera, a mão dentro da caixa e, no
   emulador, a câmera frontal em `Webcam0`.
+- **Vídeos da UFSC com `Trust anchor ... not found`**: o servidor envia só o leaf; o Android
+  confia no intermediário Let's Encrypt **YR2** apenas em `videos.nals.cce.ufsc.br`, via
+  [`plugins/withUfscVideoTrust.js`](plugins/withUfscVideoTrust.js) +
+  [`plugins/certs/ufsc-video-yr2.pem`](plugins/certs/ufsc-video-yr2.pem). Rode
+  `npx expo prebuild --clean` e rebuild. A correção definitiva é a UFSC servir `fullchain.pem`;
+  se o intermediário mudar, atualize o PEM.
 - **API não responde**: `uvicorn` com `--host 0.0.0.0`, mesma Wi-Fi/firewall do macOS ou
   `adb reverse tcp:8000 tcp:8000` + `EXPO_PUBLIC_API_URL=http://127.0.0.1:8000`.
