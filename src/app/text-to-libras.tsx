@@ -19,10 +19,12 @@ import { Brand } from '@/constants/theme';
 
 type SignItem = string;
 
+// Verifica se o item atual da lista é um link de vídeo (.mp4 ou http)
 const isVideoUrl = (item?: SignItem) =>
     typeof item === 'string' &&
     (item.includes('.mp4') || item.startsWith('http'));
 
+// Normaliza URLs para evitar problemas com caracteres especiais ou espaços
 const normalizeUrl = (url: string) => {
     try {
         return encodeURI(decodeURI(url));
@@ -35,22 +37,26 @@ const normalizeUrl = (url: string) => {
 // 15 s era curto e abortava o fetch justamente no primeiro uso por voz.
 const REQUEST_TIMEOUT_MS = 60000;
 
+// Componente responsável por reproduzir e centralizar o vídeo/sinal da universidade
 function SignVideo({ uri, onEnd }: { uri: string; onEnd: () => void }) {
     const finishedRef = useRef(false);
     const [failed, setFailed] = useState(false);
 
+    // Callback para finalizar a exibição do vídeo atual e passar para o próximo
     const finish = useCallback(() => {
         if (finishedRef.current) return;
         finishedRef.current = true;
         onEnd();
     }, [onEnd]);
 
+    // Inicializa o player do expo-video com a URL normalizada
     const player = useVideoPlayer(normalizeUrl(uri), p => {
         p.loop = false;
         p.muted = true;
         p.play();
     });
 
+    // Gerencia os listeners de reprodução e erros do vídeo
     useEffect(() => {
         const endSub = player.addListener('playToEnd', finish);
         if (player.status === 'readyToPlay') player.play();
@@ -69,6 +75,7 @@ function SignVideo({ uri, onEnd }: { uri: string; onEnd: () => void }) {
         };
     }, [player, finish, uri]);
 
+    // Fallback caso ocorra erro ao carregar o vídeo
     useEffect(() => {
         if (!failed) return;
         const t = setTimeout(finish, 2000);
@@ -86,11 +93,12 @@ function SignVideo({ uri, onEnd }: { uri: string; onEnd: () => void }) {
     }
 
     return (
+        // Container principal do vídeo utilizando Flexbox para centralização absoluta
         <View style={styles.videoArea}>
             <VideoView
                 player={player}
-                style={StyleSheet.absoluteFill}
-                contentFit="contain"
+                style={styles.videoPlayer} // Ocupa 100% da área flexível permitindo o contentFit centralizar
+                contentFit="contain"       // Mantém a proporção correta do vídeo da pessoa sem distorcer
                 nativeControls={false}
                 allowsPictureInPicture={false}
                 onFirstFrameRender={() => player.play()}
@@ -112,6 +120,7 @@ export default function TextToLibras() {
     const [runId, setRunId] = useState(0);
     const [isListening, setIsListening] = useState(false);
 
+    // Função que consome a API do servidor da universidade para buscar os sinais correspondentes ao texto
     async function handleFetchSigns(text: string) {
         if (!text.trim() || loading) return;
         Keyboard.dismiss();
@@ -161,6 +170,7 @@ export default function TextToLibras() {
         }
     }
 
+    // Avança para o próximo sinal da lista traduzida
     const advanceFrom = useCallback(
         (index: number) => {
             if (index < signs.length - 1) {
@@ -172,6 +182,7 @@ export default function TextToLibras() {
         [signs.length]
     );
 
+    // Controla o tempo de exibição caso seja texto estático/palavra digitada
     useEffect(() => {
         if (!isPlaying || signs.length === 0) return;
         if (isVideoUrl(signs[currentIndex])) return;
@@ -404,11 +415,12 @@ export default function TextToLibras() {
     };
 
     return (
+        // Evita que o teclado cubra os elementos da tela
         <KeyboardAvoidingView
             style={styles.root}
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
-            {/* Área principal do vídeo/sinais */}
+            {/* Palco principal utilizando Flexbox para centralizar a pessoa no vídeo */}
             <View style={[styles.stage, hasSigns && isCurrentVideo && styles.stageDark]}>
                 {loading && <ActivityIndicator size="large" color={Brand.yellow} />}
 
@@ -432,6 +444,7 @@ export default function TextToLibras() {
                             <Text style={styles.signText}>{currentItem}</Text>
                         )}
 
+                        {/* Badge flutuante mostrando o progresso dos sinais */}
                         <View style={styles.counterBadge} pointerEvents="none">
                             <Text style={styles.counterText}>
                                 Passo {currentIndex + 1} de {signs.length}
@@ -441,7 +454,7 @@ export default function TextToLibras() {
                 )}
             </View>
 
-            {/* Barra Inferior Unificada (Microfone + Input + Botão Traduzir) */}
+            {/* Barra inferior unificada contendo o botão de microfone, input de texto e botão traduzir */}
             <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
                 <TouchableOpacity
                     style={[styles.micButton, isListening && styles.micButtonActive]}
@@ -479,6 +492,7 @@ export default function TextToLibras() {
     );
 }
 
+// Estilos utilizando Flexbox para alinhamento e organização visual
 const styles = StyleSheet.create({
     root: {
         flex: 1,
@@ -486,8 +500,8 @@ const styles = StyleSheet.create({
     },
     stage: {
         flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
+        alignItems: 'center',     // Centraliza os itens horizontalmente no Flexbox
+        justifyContent: 'center', // Centraliza os itens verticalmente no Flexbox
         padding: 20,
     },
     stageDark: {
@@ -495,10 +509,14 @@ const styles = StyleSheet.create({
         padding: 0,
     },
     videoArea: {
-        ...StyleSheet.absoluteFill,
+        ...StyleSheet.absoluteFill, // Cobre todo o espaço do container pai de forma absoluta
         backgroundColor: Brand.black,
-        alignItems: 'center',
-        justifyContent: 'center',
+        alignItems: 'center',             // Força o alinhamento horizontal ao centro do vídeo
+        justifyContent: 'center',         // Força o alinhamento vertical ao centro do vídeo
+    },
+    videoPlayer: {
+        width: '100%',
+        height: '100%',                   // Ocupa o espaço total para que o contentFit centralize perfeitamente
     },
     videoErrorText: {
         color: Brand.white,
@@ -532,7 +550,7 @@ const styles = StyleSheet.create({
         textAlign: 'center',
     },
     inputBar: {
-        flexDirection: 'row',
+        flexDirection: 'row',     // Organiza os itens da barra inferior lado a lado (Flexbox)
         gap: 10,
         paddingHorizontal: 16,
         paddingTop: 12,
@@ -542,7 +560,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     input: {
-        flex: 1,
+        flex: 1,                  // Faz o input ocupar todo o espaço flexível disponível entre os botões
         height: 50,
         backgroundColor: Brand.surface,
         borderWidth: 1,
@@ -583,7 +601,7 @@ const styles = StyleSheet.create({
         borderColor: Brand.border,
     },
     micButtonActive: {
-        backgroundColor: '#ff4757', // Vermelho quando ativo ouvindo
+        backgroundColor: '#ff4757', // Destaca em vermelho quando o microfone está ouvindo ativamente
     },
     micButtonText: {
         fontSize: 20,
