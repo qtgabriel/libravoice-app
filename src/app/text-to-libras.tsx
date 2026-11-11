@@ -31,7 +31,9 @@ const normalizeUrl = (url: string) => {
     }
 };
 
-const REQUEST_TIMEOUT_MS = 15000;
+// O primeiro request pode carregar o modelo spaCy e consultar o SignBank;
+// 15 s era curto e abortava o fetch justamente no primeiro uso por voz.
+const REQUEST_TIMEOUT_MS = 60000;
 
 function SignVideo({ uri, onEnd }: { uri: string; onEnd: () => void }) {
     const finishedRef = useRef(false);
@@ -184,51 +186,220 @@ export default function TextToLibras() {
     const hasSigns = signs.length > 0 && !loading && currentItem !== undefined;
 
     // --- CONFIGURAÇÃO DO EXPO-SPEECH-RECOGNITION ---
-    useSpeechRecognitionEvent('result', (event) => {
-        const text = event.results[0]?.transcript;
+    // Acumula os trechos finais; a API só é chamada quando o usuário
+    // toca no botão de parar a gravação.
+    const isListeningRef = useRef(false);
+    const stopRequestedRef = useRef(false);
+    const fatalErrorRef = useRef(false);
+    const finalTranscriptRef = useRef('');
+    const interimTranscriptRef = useRef('');
+    const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const stopFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const isMountedRef = useRef(true);
+    const handleFetchSignsRef = useRef(handleFetchSigns);
+    handleFetchSignsRef.current = handleFetchSigns;
+
+    const joinTranscript = () =>
+        `${finalTranscriptRef.current} ${interimTranscriptRef.current}`
+            .replace(/\s+/g, ' ')
+            .trim();
+
+    const clearSpeechTimers = () => {
+        if (restartTimerRef.current) {
+            clearTimeout(restartTimerRef.current);
+            restartTimerRef.current = null;
+        }
+        if (stopFallbackRef.current) {
+            clearTimeout(stopFallbackRef.current);
+            stopFallbackRef.current = null;
+        }
+    };
+
+    const finishAndSubmit = () => {
+        if (!isMountedRef.current) return;
+        clearSpeechTimers();
+        const text = joinTranscript();
+        stopRequestedRef.current = false;
+        fatalErrorRef.current = false;
+        isListeningRef.current = false;
+        setIsListening(false);
+        finalTranscriptRef.current = '';
+        interimTranscriptRef.current = '';
         if (text) {
             setInputText(text);
-            handleFetchSigns(text); // Traduz automaticamente ao reconhecer a fala
+            void handleFetchSignsRef.current(text);
+        }
+    };
+
+    const startRecognition = () => {
+        try {
+            ExpoSpeechRecognitionModule.start({
+                lang: 'pt-BR',
+                interimResults: true,
+                maxAlternatives: 1,
+                // Em Android 12 e anteriores o modo contínuo é ignorado;
+                // o 'end' abaixo reinicia a sessão até o usuário parar.
+                continuous: true,
+            });
+        } catch (e) {
+            console.error(e);
+            fatalErrorRef.current = true;
+            isListeningRef.current = false;
+            setIsListening(false);
+            setError('Não foi possível continuar o microfone.');
+        }
+    };
+
+    useSpeechRecognitionEvent('result', (event) => {
+        if (!isMountedRef.current) return;
+        const text = event.results[0]?.transcript?.trim();
+        if (!text) return;
+
+        if (event.isFinal) {
+            const current = finalTranscriptRef.current.trim();
+            if (!current) {
+                finalTranscriptRef.current = text;
+            } else if (text.startsWith(current)) {
+                // Alguns engines devolvem o texto acumulado no resultado final.
+                finalTranscriptRef.current = text;
+            } else if (!current.endsWith(text)) {
+                // Resultados finais contínuos cobrem novos trechos.
+                finalTranscriptRef.current = `${current} ${text}`;
+            }
+            interimTranscriptRef.current = '';
+        } else {
+            interimTranscriptRef.current = text;
+        }
+
+        setInputText(joinTranscript());
+    });
+
+    useSpeechRecognitionEvent('start', () => {
+        if (!isMountedRef.current) return;
+        isListeningRef.current = true;
+        setIsListening(true);
+        setError('');
+    });
+
+    useSpeechRecognitionEvent('end', () => {
+        if (!isMountedRef.current || !isListeningRef.current) return;
+
+        if (stopRequestedRef.current) {
+            finishAndSubmit();
+            return;
+        }
+        if (fatalErrorRef.current) {
+            isListeningRef.current = false;
+            setIsListening(false);
+            return;
+        }
+
+        // Android 12 e anteriores encerram a sessão a cada trecho final.
+        // Reinicia para continuar ouvindo; nada é enviado à API ainda.
+        restartTimerRef.current = setTimeout(() => {
+            restartTimerRef.current = null;
+            if (!stopRequestedRef.current && isMountedRef.current && isListeningRef.current) {
+                startRecognition();
+            }
+        }, 250);
+    });
+
+    useSpeechRecognitionEvent('error', (event) => {
+        if (!isMountedRef.current) return;
+        console.error('Erro no reconhecimento de voz:', event.error, event.message);
+
+        const fatalErrors = [
+            'not-allowed',
+            'service-not-allowed',
+            'audio-capture',
+            'network',
+            'language-not-supported',
+            'busy',
+        ];
+        if (fatalErrors.includes(event.error)) {
+            fatalErrorRef.current = true;
+            isListeningRef.current = false;
+            setIsListening(false);
+            clearSpeechTimers();
+            setError('Erro no reconhecimento de voz.');
+        } else if (
+            event.error !== 'no-speech' &&
+            event.error !== 'speech-timeout' &&
+            event.error !== 'aborted'
+        ) {
+            setError('Erro no reconhecimento de voz.');
         }
     });
 
-    useSpeechRecognitionEvent('start', () => setIsListening(true));
-    useSpeechRecognitionEvent('end', () => setIsListening(false));
-    useSpeechRecognitionEvent('error', (event) => {
-        console.error('Erro no reconhecimento de voz:', event.error);
-        setIsListening(false);
-        setError('Erro no reconhecimento de voz.');
-    });
+    useEffect(() => {
+        isMountedRef.current = true;
+        return () => {
+            isMountedRef.current = false;
+            if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+            if (stopFallbackRef.current) clearTimeout(stopFallbackRef.current);
+            try {
+                ExpoSpeechRecognitionModule.abort();
+            } catch {
+                // Ignora se o módulo já estiver inativo.
+            }
+        };
+    }, []);
 
     const startListening = async () => {
+        if (isListeningRef.current) return;
         try {
             setError('');
             const permissionResult = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
-            
+
             if (!permissionResult.granted) {
                 Alert.alert('Permissão negada', 'Precisamos de acesso ao microfone para traduzir a voz.');
                 return;
             }
 
-            ExpoSpeechRecognitionModule.start({
-                lang: 'pt-BR',
-                interimResults: true,
-                maxAlternatives: 1,
-                continuous: false,
-            });
+            clearSpeechTimers();
+            finalTranscriptRef.current = '';
+            interimTranscriptRef.current = '';
+            stopRequestedRef.current = false;
+            fatalErrorRef.current = false;
+            setInputText('');
+            isListeningRef.current = true;
+            setIsListening(true);
+            startRecognition();
         } catch (e) {
             console.error(e);
+            isListeningRef.current = false;
             setIsListening(false);
             setError('Não foi possível iniciar o microfone.');
         }
     };
 
-    const stopListening = async () => {
+    const stopListening = () => {
+        if (!isListeningRef.current) return;
+        stopRequestedRef.current = true;
+
+        // Se o reconhecimento já terminou e está aguardando o restart,
+        // não há evento 'end' pendente: envia o que já foi acumulado.
+        if (restartTimerRef.current) {
+            clearSpeechTimers();
+            finishAndSubmit();
+            return;
+        }
+
+        if (stopFallbackRef.current) {
+            clearTimeout(stopFallbackRef.current);
+            stopFallbackRef.current = null;
+        }
+        stopFallbackRef.current = setTimeout(() => {
+            if (stopRequestedRef.current) {
+                finishAndSubmit();
+            }
+        }, 1200);
+
         try {
             ExpoSpeechRecognitionModule.stop();
         } catch (e) {
             console.error(e);
-            setIsListening(false);
+            finishAndSubmit();
         }
     };
 

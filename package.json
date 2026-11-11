@@ -4,7 +4,6 @@
   "main": "expo-router/entry",
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.1.1",
-    "@react-native-voice/voice": "^3.2.4",
     "expo": "~58.0.17",
     "expo-constants": "~58.0.13",
     "expo-dev-client": "~58.0.15",
