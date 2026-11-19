@@ -94,12 +94,10 @@ function SignVideo({ uri, onEnd }: { uri: string; onEnd: () => void }) {
         // Container principal do vídeo utilizando Flexbox para centralização absoluta
         <View style={styles.videoArea}>
             <VideoView
-                player={player}
-                style={styles.videoPlayer} // Ocupa 100% da área flexível permitindo o contentFit centralizar
-                contentFit="contain"       // Mantém a proporção correta do vídeo da pessoa sem distorcer
-                nativeControls={false}
-                allowsPictureInPicture={false}
-                onFirstFrameRender={() => player.play()}
+                    player={player}
+                    style={styles.videoPlayer}
+                    contentFit="cover"
+                    nativeControls={false}
             />
         </View>
     );
@@ -340,14 +338,16 @@ const styles = StyleSheet.create({
         padding: 0,
     },
     videoArea: {
-        ...StyleSheet.absoluteFill, // Cobre todo o espaço do container pai de forma absoluta
-        backgroundColor: Brand.black,
-        alignItems: 'center',             // Força o alinhamento horizontal ao centro do vídeo
-        justifyContent: 'center',         // Força o alinhamento vertical ao centro do vídeo
+        flex: 1,
+        width: '100%',
+        justifyContent: 'center',
+        alignItems: 'center',
+        overflow: 'hidden',
     },
     videoPlayer: {
         width: '100%',
-        height: '100%',                   // Ocupa o espaço total para que o contentFit centralize perfeitamente
+        height: '100%',
+        transform: [{ scale: 1.2 }],
     },
     videoErrorText: {
         color: Brand.white,
