@@ -14,7 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from 'expo-speech-recognition';
-import { getApiBaseUrl } from '../hooks/useLibrasSpelling';
+import { getApiBaseUrl } from '@/hooks/useLibrasSpelling';
 import { Brand } from '@/constants/theme';
 
 type SignItem = string;
@@ -36,6 +36,10 @@ const normalizeUrl = (url: string) => {
 // O primeiro request pode carregar o modelo spaCy e consultar o SignBank;
 // 15 s era curto e abortava o fetch justamente no primeiro uso por voz.
 const REQUEST_TIMEOUT_MS = 60000;
+
+// 1.0 = vídeo inteiro (contain); 1.4 = zoom central moderado.
+// Valores maiores ampliam o sinalizador, mas aumentam o corte nas bordas.
+const VIDEO_ZOOM = 2;
 
 // Componente responsável por reproduzir e centralizar o vídeo/sinal da universidade
 function SignVideo({ uri, onEnd }: { uri: string; onEnd: () => void }) {
@@ -93,13 +97,16 @@ function SignVideo({ uri, onEnd }: { uri: string; onEnd: () => void }) {
     }
 
     return (
-        // Container principal do vídeo utilizando Flexbox para centralização absoluta
+        // contain + zoom central: amplia o sinalizador sem o corte agressivo
+        // do cover; o que sobrar vira barra preta, não corte.
         <View style={styles.videoArea}>
             <VideoView
-                    player={player}
-                    style={styles.videoPlayer}
-                    contentFit="cover"
-                    nativeControls={false}
+                player={player}
+                style={[styles.videoPlayer, { transform: [{ scale: VIDEO_ZOOM }] }]}
+                contentFit="contain"
+                nativeControls={false}
+                allowsPictureInPicture={false}
+                onFirstFrameRender={() => player.play()}
             />
         </View>
     );
@@ -509,6 +516,7 @@ const styles = StyleSheet.create({
     videoArea: {
         flex: 1,
         width: '100%',
+        backgroundColor: Brand.black,
         justifyContent: 'center',
         alignItems: 'center',
         overflow: 'hidden',
@@ -516,7 +524,6 @@ const styles = StyleSheet.create({
     videoPlayer: {
         width: '100%',
         height: '100%',
-        transform: [{ scale: 1.2 }],
     },
     videoErrorText: {
         color: Brand.white,

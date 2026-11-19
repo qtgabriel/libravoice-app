@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
+import * as Device from 'expo-device';
 import * as Speech from 'expo-speech';
 
 export type Landmark = { x: number; y: number; z: number };
@@ -64,6 +65,12 @@ function closeWord(current: string): string {
 export function getApiBaseUrl(): string {
     const fromEnv = process.env.EXPO_PUBLIC_API_URL;
     if (fromEnv) return fromEnv.replace(/\/$/, '');
+
+    // No emulador Android, 10.0.2.2 é o loopback do Mac. Funciona mesmo
+    // quando o uvicorn sobe em 127.0.0.1; o IP da LAN pode não estar exposto.
+    if (Platform.OS === 'android' && Device.isDevice === false) {
+        return 'http://10.0.2.2:8000';
+    }
 
     const hostUri = Constants.expoConfig?.hostUri;
     const host = hostUri?.split(':')[0];
